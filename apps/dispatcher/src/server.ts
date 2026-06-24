@@ -17,7 +17,8 @@ const CreateRepoBindingSchema = z.object({
   repo: z.string().min(1),
   runnerId: z.string().min(1),
   workspacePath: z.string().min(1).optional(),
-  defaultExecutor: z.string().min(1).optional()
+  defaultExecutor: z.string().min(1).optional(),
+  allowedActors: z.array(z.string().min(1)).optional()
 });
 
 const CreateRunSchema = z.object({
@@ -34,6 +35,22 @@ const ProgressSchema = z.object({
   message: z.string().min(1),
   at: z.string().datetime().optional()
 });
+
+function repoKeyFromEvent(event: z.infer<typeof OpenTagEventSchema>): { provider: string; owner: string; repo: string } | null {
+  const owner = event.metadata["owner"];
+  const repo = event.metadata["repo"];
+  if (typeof owner !== "string" || typeof repo !== "string") return null;
+  return { provider: event.source, owner, repo };
+}
+
+function isWriteCapable(event: z.infer<typeof OpenTagEventSchema>): boolean {
+  return event.permissions.some((permission) => ["repo:write", "pr:create", "pr:update"].includes(permission.scope));
+}
+
+function actorIsAllowed(event: z.infer<typeof OpenTagEventSchema>, allowedActors: string[] | undefined): boolean {
+  if (!allowedActors?.length) return true;
+  return allowedActors.includes(event.actor.handle ?? "") || allowedActors.includes(event.actor.providerUserId);
+}
 
 export type CallbackMessage = {
   runId: string;
@@ -89,7 +106,8 @@ export function createDispatcherApp(input: { databasePath: string; callbackSink?
       repo: parsed.repo,
       runnerId: parsed.runnerId,
       ...(parsed.workspacePath ? { workspacePath: parsed.workspacePath } : {}),
-      ...(parsed.defaultExecutor ? { defaultExecutor: parsed.defaultExecutor } : {})
+      ...(parsed.defaultExecutor ? { defaultExecutor: parsed.defaultExecutor } : {}),
+      ...(parsed.allowedActors?.length ? { allowedActors: parsed.allowedActors } : {})
     });
     return c.json({ ok: true }, 201);
   });
@@ -106,6 +124,18 @@ export function createDispatcherApp(input: { databasePath: string; callbackSink?
 
   app.post("/v1/runs", async (c) => {
     const parsed = CreateRunSchema.parse(await c.req.json());
+    const repoKey = repoKeyFromEvent(parsed.event);
+    if (!repoKey) {
+      return c.json({ error: "repo_context_missing" }, 422);
+    }
+    const binding = await repo.getRepoBinding(repoKey);
+    if (!binding) {
+      return c.json({ error: "repo_not_bound" }, 403);
+    }
+    if (isWriteCapable(parsed.event) && !actorIsAllowed(parsed.event, binding.allowedActors)) {
+      return c.json({ error: "actor_not_allowed_for_write" }, 403);
+    }
+
     const run = await repo.createRun({ id: parsed.runId, event: parsed.event });
     await deliverAndAudit({
       repo,
@@ -125,6 +155,12 @@ export function createDispatcherApp(input: { databasePath: string; callbackSink?
     const claimed = await repo.claimNextRun({ runnerId: c.req.param("runnerId"), leaseSeconds: 60 });
     if (!claimed) return c.body(null, 204);
     return c.json(claimed, 200);
+  });
+
+  app.post("/v1/runners/:runnerId/runs/:runId/heartbeat", async (c) => {
+    const ok = await repo.heartbeat({ runnerId: c.req.param("runnerId"), runId: c.req.param("runId") });
+    if (!ok) return c.json({ error: "run_not_claimed_by_runner" }, 404);
+    return c.json({ ok: true });
   });
 
   app.post("/v1/runs/:runId/running", async (c) => {

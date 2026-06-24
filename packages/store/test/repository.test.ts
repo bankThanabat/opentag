@@ -59,7 +59,8 @@ describe("OpenTag repository", () => {
       repo: "demo",
       runnerId: "runner_1",
       workspacePath: "/Users/test/demo",
-      defaultExecutor: "echo"
+      defaultExecutor: "echo",
+      allowedActors: ["octocat"]
     });
     await repo.createRun({
       id: "run_bound",
@@ -83,7 +84,43 @@ describe("OpenTag repository", () => {
     expect(claimed?.run.id).toBe("run_bound");
 
     const binding = await repo.getRepoBinding({ provider: "github", owner: "acme", repo: "demo" });
-    expect(binding).toMatchObject({ runnerId: "runner_1", workspacePath: "/Users/test/demo", defaultExecutor: "echo" });
+    expect(binding).toMatchObject({
+      runnerId: "runner_1",
+      workspacePath: "/Users/test/demo",
+      defaultExecutor: "echo",
+      allowedActors: ["octocat"]
+    });
+  });
+
+  it("records runner heartbeats for claimed runs", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.registerRunner({ runnerId: "runner_1", name: "Runner One" });
+    await repo.createRepoBinding({ provider: "github", owner: "acme", repo: "demo", runnerId: "runner_1" });
+    await repo.createRun({
+      id: "run_heartbeat",
+      event: {
+        id: "evt_heartbeat",
+        source: "github",
+        sourceEventId: "comment_heartbeat",
+        receivedAt: "2026-06-24T00:00:00.000Z",
+        actor: { provider: "github", providerUserId: "42", handle: "octocat" },
+        target: { mention: "@opentag", agentId: "opentag" },
+        command: { rawText: "fix this", intent: "fix", args: {} },
+        context: [],
+        permissions: [{ scope: "issue:comment", reason: "reply to source thread" }],
+        callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/1/comments" },
+        metadata: { owner: "acme", repo: "demo" }
+      }
+    });
+    await repo.claimNextRun({ runnerId: "runner_1", leaseSeconds: 60 });
+
+    await expect(repo.heartbeat({ runId: "run_heartbeat", runnerId: "runner_1" })).resolves.toBe(true);
+    const events = await repo.listRunEvents({ runId: "run_heartbeat" });
+    expect(events.map((event) => event.type)).toContain("run.heartbeat");
   });
 
   it("records a completed result", async () => {

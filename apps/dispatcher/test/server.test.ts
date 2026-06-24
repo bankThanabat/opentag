@@ -35,7 +35,8 @@ describe("dispatcher API", () => {
         repo: "demo",
         runnerId: "runner_1",
         workspacePath: "/Users/test/demo",
-        defaultExecutor: "echo"
+        defaultExecutor: "echo",
+        allowedActors: ["octocat"]
       })
     });
     expect(bindingResponse.status).toBe(201);
@@ -69,11 +70,6 @@ describe("dispatcher API", () => {
       }
     });
 
-    await app.request("/v1/runs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ runId: "run_2", event: { ...validEvent, id: "evt_2", sourceEventId: "comment_2" } })
-    });
     await app.request("/v1/repo-bindings", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -83,9 +79,16 @@ describe("dispatcher API", () => {
         repo: "demo",
         runnerId: "runner_1",
         workspacePath: "/Users/test/demo",
-        defaultExecutor: "echo"
+        defaultExecutor: "echo",
+        allowedActors: ["octocat"]
       })
     });
+    const createResponse = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_2", event: { ...validEvent, id: "evt_2", sourceEventId: "comment_2" } })
+    });
+    expect(createResponse.status).toBe(201);
     await app.request("/v1/runs/run_2/progress", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -118,5 +121,76 @@ describe("dispatcher API", () => {
       "run.completed",
       "callback.final.delivered"
     ]);
+  });
+
+  it("rejects runs for repositories without an explicit binding", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+
+    const response = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_unbound", event: validEvent })
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "repo_not_bound" });
+  });
+
+  it("rejects write-capable runs from actors outside the repo binding allowlist", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        allowedActors: ["someone-else"]
+      })
+    });
+    const response = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        runId: "run_denied",
+        event: {
+          ...validEvent,
+          permissions: [
+            ...validEvent.permissions,
+            { scope: "repo:write", reason: "write branch" },
+            { scope: "pr:create", reason: "open pull request" }
+          ]
+        }
+      })
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "actor_not_allowed_for_write" });
+  });
+
+  it("accepts runner heartbeat for claimed runs", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+
+    await app.request("/v1/runners", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runnerId: "runner_1", name: "Local Runner" })
+    });
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "github", owner: "acme", repo: "demo", runnerId: "runner_1" })
+    });
+    await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_heartbeat", event: validEvent })
+    });
+    await app.request("/v1/runners/runner_1/claim", { method: "POST" });
+
+    const response = await app.request("/v1/runners/runner_1/runs/run_heartbeat/heartbeat", { method: "POST" });
+    expect(response.status).toBe(200);
   });
 });

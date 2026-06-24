@@ -11,7 +11,9 @@ export const runs = sqliteTable(
     resultJson: text("result_json"),
     assignedRunnerId: text("assigned_runner_id"),
     executor: text("executor"),
+    leasedAt: text("leased_at"),
     leaseExpiresAt: text("lease_expires_at"),
+    heartbeatAt: text("heartbeat_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull()
   },
@@ -46,6 +48,7 @@ export const repoBindings = sqliteTable(
     runnerId: text("runner_id").notNull(),
     workspacePath: text("workspace_path"),
     defaultExecutor: text("default_executor"),
+    allowedActorsJson: text("allowed_actors_json"),
     createdAt: text("created_at").notNull()
   },
   (table) => ({
@@ -63,7 +66,9 @@ export function migrateSchema(sqlite: Database.Database): void {
       result_json TEXT,
       assigned_runner_id TEXT,
       executor TEXT,
+      leased_at TEXT,
       lease_expires_at TEXT,
+      heartbeat_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -90,6 +95,7 @@ export function migrateSchema(sqlite: Database.Database): void {
       runner_id TEXT NOT NULL,
       workspace_path TEXT,
       default_executor TEXT,
+      allowed_actors_json TEXT,
       created_at TEXT NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS repo_bindings_provider_owner_repo_idx
@@ -102,5 +108,16 @@ export function migrateSchema(sqlite: Database.Database): void {
   }
   if (!columnNames.has("default_executor")) {
     sqlite.exec("ALTER TABLE repo_bindings ADD COLUMN default_executor TEXT");
+  }
+  if (!columnNames.has("allowed_actors_json")) {
+    sqlite.exec("ALTER TABLE repo_bindings ADD COLUMN allowed_actors_json TEXT");
+  }
+  const runColumns = sqlite.prepare("PRAGMA table_info(runs)").all() as { name: string }[];
+  const runColumnNames = new Set(runColumns.map((column) => column.name));
+  if (!runColumnNames.has("leased_at")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN leased_at TEXT");
+  }
+  if (!runColumnNames.has("heartbeat_at")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT");
   }
 }

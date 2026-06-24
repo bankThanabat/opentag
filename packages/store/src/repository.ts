@@ -23,6 +23,7 @@ export type RepoBinding = {
   runnerId: string;
   workspacePath?: string;
   defaultExecutor?: string;
+  allowedActors?: string[];
 };
 
 function nowIso(): string {
@@ -79,6 +80,7 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       runnerId: string;
       workspacePath?: string;
       defaultExecutor?: string;
+      allowedActors?: string[];
     }): Promise<void> {
       await db
         .insert(repoBindings)
@@ -86,6 +88,7 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
           ...input,
           workspacePath: input.workspacePath ?? null,
           defaultExecutor: input.defaultExecutor ?? null,
+          allowedActorsJson: input.allowedActors ? JSON.stringify(input.allowedActors) : null,
           createdAt: nowIso()
         })
         .onConflictDoUpdate({
@@ -93,7 +96,8 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
           set: {
             runnerId: input.runnerId,
             workspacePath: input.workspacePath ?? null,
-            defaultExecutor: input.defaultExecutor ?? null
+            defaultExecutor: input.defaultExecutor ?? null,
+            allowedActorsJson: input.allowedActors ? JSON.stringify(input.allowedActors) : null
           }
         });
     },
@@ -148,20 +152,23 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       if (!row) return null;
 
       const updatedAt = nowIso();
+      const leasedAt = updatedAt;
       const leaseExpiresAt = new Date(Date.now() + input.leaseSeconds * 1000).toISOString();
       await db
         .update(runs)
         .set({
           status: "assigned",
           assignedRunnerId: input.runnerId,
+          leasedAt,
           leaseExpiresAt,
+          heartbeatAt: leasedAt,
           updatedAt
         })
         .where(eq(runs.id, row.id));
       await appendRunEvent({
         runId: row.id,
         type: "run.claimed",
-        payload: { runnerId: input.runnerId, leaseExpiresAt },
+        payload: { runnerId: input.runnerId, leasedAt, leaseExpiresAt },
         createdAt: updatedAt
       });
 
@@ -195,8 +202,28 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         repo: row.repo,
         runnerId: row.runnerId,
         ...(row.workspacePath ? { workspacePath: row.workspacePath } : {}),
-        ...(row.defaultExecutor ? { defaultExecutor: row.defaultExecutor } : {})
+        ...(row.defaultExecutor ? { defaultExecutor: row.defaultExecutor } : {}),
+        ...(row.allowedActorsJson ? { allowedActors: JSON.parse(row.allowedActorsJson) as string[] } : {})
       };
+    },
+
+    async heartbeat(input: { runId: string; runnerId: string }): Promise<boolean> {
+      const updatedAt = nowIso();
+      const row = await db
+        .select()
+        .from(runs)
+        .where(and(eq(runs.id, input.runId), eq(runs.assignedRunnerId, input.runnerId)))
+        .limit(1)
+        .get();
+      if (!row) return false;
+      await db.update(runs).set({ heartbeatAt: updatedAt, updatedAt }).where(eq(runs.id, input.runId));
+      await appendRunEvent({
+        runId: input.runId,
+        type: "run.heartbeat",
+        payload: { runnerId: input.runnerId, heartbeatAt: updatedAt },
+        createdAt: updatedAt
+      });
+      return true;
     },
 
     async markRunning(input: { runId: string; executor: string }): Promise<void> {
