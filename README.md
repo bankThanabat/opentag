@@ -21,6 +21,8 @@ The first implementation focuses on a narrow GitHub-to-local-runner loop:
 
 The dispatcher only leases a run to a runner that is explicitly bound to the source repository, and the local daemon only executes runs whose repository is mapped to a configured local checkout.
 
+GitHub ingress currently handles both `issue_comment.created` and `pull_request_review_comment.created`.
+
 ## Packages
 
 - `packages/core`: protocol schemas and mention parsing.
@@ -39,6 +41,10 @@ pnpm test
 pnpm build
 pnpm typecheck
 ```
+
+## Dispatcher Callback Delivery
+
+Set `OPENTAG_GITHUB_TOKEN` on the dispatcher to let it post acknowledgement, progress, and final callback messages to GitHub comments. When dispatcher callbacks are enabled, set `OPENTAG_DISPATCHER_OWNS_CALLBACKS=true` on the Probot app to avoid duplicate acknowledgement comments.
 
 ## Local Runner Config
 
