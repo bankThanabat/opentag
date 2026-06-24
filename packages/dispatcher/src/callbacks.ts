@@ -3,6 +3,10 @@ import type { CallbackMessage, CallbackSink } from "./server.js";
 
 export type FetchLike = typeof fetch;
 
+function slackUpdateUriFrom(postMessageUri: string): string {
+  return postMessageUri.replace(/\/chat\.postMessage$/, "/chat.update");
+}
+
 export function createGitHubCallbackSink(input: { token?: string; fetchImpl?: FetchLike }): CallbackSink {
   const fetchImpl = input.fetchImpl ?? fetch;
 
@@ -40,7 +44,7 @@ export function createSlackCallbackSink(input: { botToken?: string; fetchImpl?: 
 
       const thread = parseSlackThreadKey(message.threadKey ?? "");
       const existingStatusTs = message.statusMessageKey ? statusMessageTsByKey.get(message.statusMessageKey) : undefined;
-      const response = await fetchImpl(existingStatusTs ? "https://slack.com/api/chat.update" : message.uri, {
+      const response = await fetchImpl(existingStatusTs ? slackUpdateUriFrom(message.uri) : message.uri, {
         method: "POST",
         headers: {
           authorization: `Bearer ${input.botToken}`,
@@ -72,6 +76,13 @@ export function createSlackCallbackSink(input: { botToken?: string; fetchImpl?: 
       }
       if (message.statusMessageKey && !existingStatusTs && body.ts) {
         statusMessageTsByKey.set(message.statusMessageKey, body.ts);
+      }
+      if (message.kind === "final") {
+        for (const key of statusMessageTsByKey.keys()) {
+          if (key.startsWith(`${message.runId}:`)) {
+            statusMessageTsByKey.delete(key);
+          }
+        }
       }
     }
   };

@@ -235,7 +235,8 @@ export function createDispatcherApp(input: { databasePath: string; callbackSink?
           provider: stored.event.callback.provider,
           uri: stored.event.callback.uri,
           body: presentation.progress({ provider: stored.event.callback.provider, runId, message: body.message }),
-          ...(stored.event.callback.threadKey ? { threadKey: stored.event.callback.threadKey } : {})
+          ...(stored.event.callback.threadKey ? { threadKey: stored.event.callback.threadKey } : {}),
+          statusMessageKey: `${runId}:status`
         }
       });
     }

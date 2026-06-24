@@ -22,11 +22,21 @@ export type SlackMessagePayload = {
   blocks?: SlackBlock[];
 };
 
+function escapeSlackText(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 export function markdownToSlackMrkdwn(text: string): string {
-  return text
+  const links: string[] = [];
+  const withoutLinks = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, url: string) => {
+    const token = `\u0000SLACK_LINK_${links.length}\u0000`;
+    links.push(`<${url}|${escapeSlackText(label)}>`);
+    return token;
+  });
+  const converted = escapeSlackText(withoutLinks)
     .replace(/\*\*(.+?)\*\*/g, "*$1*")
-    .replace(/__(.+?)__/g, "*$1*")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>");
+    .replace(/__(.+?)__/g, "*$1*");
+  return links.reduce((output, link, index) => output.replace(`\u0000SLACK_LINK_${index}\u0000`, link), converted);
 }
 
 export function renderSlackAcknowledgement(runId: string): string {
@@ -67,7 +77,7 @@ export function createSlackFinalResultBlocks(result: OpenTagRunResult): SlackBlo
       type: "section",
       text: {
         type: "mrkdwn",
-        text: ["*Verification*", ...result.verification.map((check) => `- \`${check.command}\`: ${check.outcome}`)].join("\n")
+        text: markdownToSlackMrkdwn(["*Verification*", ...result.verification.map((check) => `- \`${check.command}\`: ${check.outcome}`)].join("\n"))
       }
     });
   }

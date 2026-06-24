@@ -26,6 +26,9 @@ describe("Slack callback rendering", () => {
 
   it("converts common Markdown to Slack mrkdwn", () => {
     expect(markdownToSlackMrkdwn("**bold** and [docs](https://example.com)")).toBe("*bold* and <https://example.com|docs>");
+    expect(markdownToSlackMrkdwn("Use <tag> & [docs & api](https://example.com?a=1&b=2)")).toBe(
+      "Use &lt;tag&gt; &amp; <https://example.com?a=1&b=2|docs &amp; api>"
+    );
   });
 
   it("builds Slack post and update payloads", () => {
@@ -45,7 +48,7 @@ describe("Slack callback rendering", () => {
     const blocks = createSlackFinalResultBlocks({
       conclusion: "success",
       summary: "See [PR](https://example.com/pr)",
-      verification: [{ command: "echo", outcome: "passed" }]
+      verification: [{ command: "echo '<tag>'", outcome: "passed" }]
     });
 
     expect(blocks).toEqual([
@@ -61,7 +64,7 @@ describe("Slack callback rendering", () => {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: "*Verification*\n- `echo`: passed"
+          text: "*Verification*\n- `echo '&lt;tag&gt;'`: passed"
         }
       }
     ]);

@@ -242,6 +242,82 @@ describe("dispatcher API", () => {
     ]);
   });
 
+  it("adds a stable statusMessageKey when progress callbacks are delivered", async () => {
+    const delivered: Array<{ kind: string; statusMessageKey?: string }> = [];
+    const app = createDispatcherApp({
+      databasePath: ":memory:",
+      presentation: {
+        shouldDeliverProgress(provider) {
+          return provider === "slack";
+        },
+        acknowledgement({ runId }) {
+          return `ack ${runId}`;
+        },
+        progress({ message }) {
+          return `progress ${message}`;
+        },
+        final() {
+          return { body: "final" };
+        }
+      },
+      callbackSink: {
+        async deliver(message) {
+          delivered.push({
+            kind: message.kind,
+            ...(message.statusMessageKey ? { statusMessageKey: message.statusMessageKey } : {})
+          });
+        }
+      }
+    });
+
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        workspacePath: "/Users/test/demo",
+        defaultExecutor: "echo"
+      })
+    });
+
+    const response = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        runId: "run_status_key",
+        event: {
+          ...validEvent,
+          id: "evt_status_key",
+          source: "slack",
+          sourceEventId: "EvStatus",
+          actor: { provider: "slack", providerUserId: "U123", handle: "U123", organizationId: "T123" },
+          permissions: [{ scope: "chat:postMessage", reason: "reply in thread" }],
+          callback: {
+            provider: "slack",
+            uri: "https://slack.com/api/chat.postMessage",
+            threadKey: "T123|C123|1710000000.000100"
+          }
+        }
+      })
+    });
+    expect(response.status).toBe(201);
+
+    const progressResponse = await app.request("/v1/runs/run_status_key/progress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "executor.progress", message: "working", at: "2026-06-24T00:00:01.000Z" })
+    });
+    expect(progressResponse.status).toBe(200);
+
+    expect(delivered).toEqual([
+      { kind: "acknowledgement" },
+      { kind: "progress", statusMessageKey: "run_status_key:status" }
+    ]);
+  });
+
   it("rejects runs for repositories without an explicit binding", async () => {
     const app = createDispatcherApp({ databasePath: ":memory:" });
 

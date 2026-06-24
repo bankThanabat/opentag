@@ -110,7 +110,7 @@ describe("createGitHubCallbackSink", () => {
       runId: "run_1",
       kind: "progress",
       provider: "slack",
-      uri: "https://slack.com/api/chat.postMessage",
+      uri: "https://slack-proxy.example.com/api/chat.postMessage",
       threadKey: "T123|C123|1710000000.000100",
       body: "Starting",
       statusMessageKey: "run_1:status"
@@ -119,7 +119,7 @@ describe("createGitHubCallbackSink", () => {
       runId: "run_1",
       kind: "progress",
       provider: "slack",
-      uri: "https://slack.com/api/chat.postMessage",
+      uri: "https://slack-proxy.example.com/api/chat.postMessage",
       threadKey: "T123|C123|1710000000.000100",
       body: "Still working",
       statusMessageKey: "run_1:status"
@@ -127,7 +127,7 @@ describe("createGitHubCallbackSink", () => {
 
     expect(requests).toEqual([
       {
-        url: "https://slack.com/api/chat.postMessage",
+        url: "https://slack-proxy.example.com/api/chat.postMessage",
         authorization: "Bearer xoxb-test",
         body: {
           channel: "C123",
@@ -136,7 +136,7 @@ describe("createGitHubCallbackSink", () => {
         }
       },
       {
-        url: "https://slack.com/api/chat.update",
+        url: "https://slack-proxy.example.com/api/chat.update",
         authorization: "Bearer xoxb-test",
         body: {
           channel: "C123",
@@ -144,6 +144,54 @@ describe("createGitHubCallbackSink", () => {
           ts: "1720000000.000100"
         }
       }
+    ]);
+  });
+
+  it("cleans up Slack status message keys when a run finishes", async () => {
+    const requests: { url: string; body: unknown }[] = [];
+    const sink = createSlackCallbackSink({
+      botToken: "xoxb-test",
+      fetchImpl: (async (url, init) => {
+        const body = JSON.parse(String(init?.body));
+        requests.push({ url: String(url), body });
+        if (String(url).endsWith("/chat.postMessage")) {
+          return Response.json({ ok: true, ts: `posted-${requests.length}` });
+        }
+        return Response.json({ ok: true, ts: body.ts });
+      }) as typeof fetch
+    });
+
+    await sink.deliver({
+      runId: "run_1",
+      kind: "progress",
+      provider: "slack",
+      uri: "https://slack.com/api/chat.postMessage",
+      threadKey: "T123|C123|1710000000.000100",
+      body: "Starting",
+      statusMessageKey: "run_1:status"
+    });
+    await sink.deliver({
+      runId: "run_1",
+      kind: "final",
+      provider: "slack",
+      uri: "https://slack.com/api/chat.postMessage",
+      threadKey: "T123|C123|1710000000.000100",
+      body: "Done"
+    });
+    await sink.deliver({
+      runId: "run_1",
+      kind: "progress",
+      provider: "slack",
+      uri: "https://slack.com/api/chat.postMessage",
+      threadKey: "T123|C123|1710000000.000100",
+      body: "Starting again",
+      statusMessageKey: "run_1:status"
+    });
+
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://slack.com/api/chat.postMessage",
+      "https://slack.com/api/chat.postMessage",
+      "https://slack.com/api/chat.postMessage"
     ]);
   });
 
