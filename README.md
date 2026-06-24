@@ -1,48 +1,151 @@
 # OpenTag
 
-OpenTag is the open mention layer for agents.
+**Open-source agent mentions for every workspace.**
 
-Tag Claude Code, Codex, Hermes, OpenClaw, or your own local runner from GitHub or Slack. OpenTag turns the mention into an auditable run, dispatches it to an approved local or hosted executor, and reports the result back to the original workspace.
+[![Status](https://img.shields.io/badge/status-v0-blue)](#status)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6)](https://www.typescriptlang.org/)
+[![Node](https://img.shields.io/badge/Node-22.x-339933)](https://nodejs.org/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](#license)
 
-## Why
+Claude Tag showed the new interface for team AI: tag an agent where work is already happening, let it use the right tools, and get the result back in the thread.
 
-Claude Tag brings Claude into Slack. OpenTag brings any agent into any workspace.
+OpenTag makes that pattern open. Bring `@opentag` to GitHub, Slack, or your own workspace surface; route the request through an auditable dispatcher; and run Claude Code, Codex, Hermes, OpenClaw, or a custom local runner without locking the whole workflow to one vendor.
 
-## V0 Direction
+> OpenTag is not affiliated with Anthropic. It is an open implementation of the agent-mention workflow that Claude Tag made obvious.
 
-The first implementation focuses on a narrow GitHub-to-local-runner loop:
+```mermaid
+flowchart LR
+  A["GitHub or Slack mention"] --> B["OpenTag event"]
+  B --> C["Hosted or embedded dispatcher"]
+  C --> D["Bound local daemon"]
+  D --> E["Claude Code, Codex, or custom runner"]
+  E --> F["Reply, audit log, or pull request"]
+```
 
-1. A GitHub comment mentions `@opentag`.
-2. A Probot app normalizes the event.
-3. A thin hosted dispatcher stores and leases the run.
-4. A local daemon claims the run.
-5. An executor adapter runs the task.
-6. OpenTag reports the result back to GitHub.
+## Why OpenTag
 
-The dispatcher only leases a run to a runner that is explicitly bound to the source repository, and the local daemon only executes runs whose repository is mapped to a configured local checkout.
+Claude Tag is a strong product signal: teams want to tag AI into shared work, not copy context into another chat window. But the first release is Claude-first, Slack-first, and available in beta for Claude Enterprise and Team.
 
-GitHub ingress currently handles both `issue_comment.created` and `pull_request_review_comment.created`.
-Slack ingress currently handles `url_verification` and `app_mention` events for bound channels.
+OpenTag is for developers and teams who want the same interaction model with open control:
+
+| Claude Tag pattern | OpenTag approach |
+| --- | --- |
+| Tag `@Claude` in Slack | Tag `@opentag` from GitHub, Slack, or another adapter |
+| Claude executes with configured tools | Any approved executor can run: Claude Code, Codex, Hermes, OpenClaw, or custom |
+| Agent identity is provisioned by admins | Repository and channel bindings are explicit, auditable records |
+| Work happens inside Anthropic's product boundary | Dispatch can be self-hosted, embedded, or pointed at local runners |
+| Results come back to the thread | Results can be comments, progress updates, audit events, branches, or PRs |
+
+The goal is simple: make "tag an agent into work" a protocol, not a closed surface.
+
+## What Works Today
+
+- **GitHub mentions** - `issue_comment.created` and `pull_request_review_comment.created` become normalized OpenTag events.
+- **Slack app mentions** - bound Slack channels can route `app_mention` events to the same dispatcher and local daemon path.
+- **Auditable dispatch** - every run is stored with event metadata, status transitions, progress, result, and callback delivery events.
+- **Explicit runner binding** - a runner only claims runs for repositories it is bound to.
+- **Local-first execution** - `opentagd` resolves a configured local checkout before executing anything.
+- **Executor adapters** - `echo` is available for smoke tests, and `codex` can run a real Codex CLI task on an isolated branch.
+- **Embeddable SDK packages** - use the protocol, client, dispatcher, GitHub, Slack, runner, and store packages independently.
+
+## Quick Start
+
+Requires Node 22.x and pnpm 9.x.
+
+```bash
+pnpm install
+pnpm test
+pnpm build
+```
+
+For the full local GitHub-to-runner smoke test, follow [examples/github-to-echo](examples/github-to-echo/README.md). It starts the dispatcher, binds a local runner, creates a sample GitHub-shaped run, executes it with the echo executor, and lets you inspect the audit log.
+
+## Try The Local Echo Loop
+
+Start the dispatcher:
+
+```bash
+OPENTAG_DATABASE_PATH=opentag.db pnpm --filter @opentag/dispatcher-app dev
+```
+
+Create `opentag.local.json`:
+
+```json
+{
+  "runnerId": "runner_local",
+  "dispatcherUrl": "http://localhost:3030",
+  "pollIntervalMs": 5000,
+  "heartbeatIntervalMs": 15000,
+  "repositories": [
+    {
+      "provider": "github",
+      "owner": "acme",
+      "repo": "demo",
+      "checkoutPath": "/Users/example/repos/demo",
+      "defaultExecutor": "echo",
+      "baseBranch": "main",
+      "pushRemote": "origin"
+    }
+  ]
+}
+```
+
+Register and bind the local runner:
+
+```bash
+OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- register-runner
+OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- bind-repos
+```
+
+Create a run and execute once:
+
+```bash
+curl -X POST http://localhost:3030/v1/runs \
+  -H 'content-type: application/json' \
+  -d @examples/github-to-echo/run.example.json
+
+OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- run-once
+```
+
+Inspect the result:
+
+```bash
+curl http://localhost:3030/v1/runs/run_demo_1
+curl http://localhost:3030/v1/runs/run_demo_1/events
+```
+
+## How It Works
+
+1. **Ingress normalizes platform events.** GitHub and Slack adapters translate comments or app mentions into one `OpenTagEvent` schema.
+2. **The dispatcher validates scope.** Runs must include repository metadata, and the repository must be explicitly bound to a runner.
+3. **The local daemon claims only mapped work.** `opentagd` checks its local repository config before running an executor.
+4. **The executor does the work.** The echo executor proves the loop; the Codex executor creates an isolated `opentag/<runId>` branch and runs `codex exec`.
+5. **Callbacks and audit events close the loop.** Progress and final results can be posted back to GitHub or Slack, and every step stays queryable through the dispatcher.
 
 ## Packages
 
-- `packages/core`: protocol schemas and mention parsing.
-- `packages/client`: dispatcher HTTP client for ingress apps, local runners, and admin setup.
-- `packages/dispatcher`: embeddable dispatcher Hono app and callback sinks.
-- `packages/github`: GitHub event normalization and callback rendering.
-- `packages/slack`: Slack event normalization, thread keys, and callback helpers.
-- `packages/store`: SQLite/Drizzle persistence and lease primitives.
-- `packages/runner`: executor contracts and the echo executor.
-- `apps/dispatcher`: runnable hosted dispatcher process.
-- `apps/opentagd`: local runner daemon.
-- `apps/github-probot`: GitHub App ingress.
-- `apps/slack-events`: Slack Events API ingress.
+| Package | Purpose |
+| --- | --- |
+| `@opentag/core` | Zod schemas, TypeScript types, mention parsing, and JSON Schema exports |
+| `@opentag/client` | HTTP client for ingress apps, local runners, and admin setup |
+| `@opentag/dispatcher` | Embeddable Hono dispatcher and callback sinks |
+| `@opentag/github` | GitHub event normalization, comment rendering, and PR helpers |
+| `@opentag/slack` | Slack event normalization, thread keys, and callback helpers |
+| `@opentag/store` | SQLite/Drizzle persistence and lease primitives |
+| `@opentag/runner` | Executor contracts plus echo and Codex executor adapters |
+
+Runnable apps:
+
+| App | Purpose |
+| --- | --- |
+| `apps/dispatcher` | Hosted dispatcher process |
+| `apps/opentagd` | Local daemon that claims and executes runs |
+| `apps/github-probot` | GitHub App ingress |
+| `apps/slack-events` | Slack Events API ingress |
 
 ## SDK Usage
 
-OpenTag can be embedded as packages in another system. Use `@opentag/core` for the stable protocol, provider packages such as `@opentag/github` and `@opentag/slack` to normalize workspace events, `@opentag/client` to talk to a dispatcher over HTTP, and `@opentag/dispatcher` when you want to host the dispatcher inside your own service.
-
-Normalize a GitHub event and enqueue it through the dispatcher client:
+Normalize a GitHub comment and enqueue it:
 
 ```ts
 import { createOpenTagClient } from "@opentag/client";
@@ -68,7 +171,11 @@ if (event) {
     dispatcherUrl: process.env.OPENTAG_DISPATCHER_URL!,
     pairingToken: process.env.OPENTAG_DISPATCHER_TOKEN
   });
-  await client.createRun({ runId: `run_${Date.now()}`, event });
+
+  await client.createRun({
+    runId: `run_${Date.now()}`,
+    event
+  });
 }
 ```
 
@@ -86,75 +193,67 @@ export const dispatcher = createDispatcherApp({
 });
 ```
 
-## Commands
+## Executor Model
 
-```bash
-pnpm install
-pnpm test
-pnpm build
-pnpm typecheck
-```
+OpenTag treats executors as adapters, not as the center of the system.
 
-## Publishing
+An executor receives:
 
-Public packages include `publishConfig.access=public` and publish only `dist` plus their package README. Versioning rules and the release checklist live in [docs/versioning.md](docs/versioning.md).
+- `runId`
+- `workspacePath`
+- normalized command text
+- context pointers from the source workspace
 
-## Examples
+It returns:
 
-- [examples/github-to-echo](examples/github-to-echo/README.md): manual end-to-end GitHub-to-local-runner smoke test.
-- [examples/embedded-dispatcher](examples/embedded-dispatcher/README.md): embed `@opentag/dispatcher` inside another Node service.
-- [examples/custom-runner](examples/custom-runner/README.md): build a third-party runner with `@opentag/client` and `@opentag/runner`.
+- conclusion
+- human-readable summary
+- changed files
+- verification results
+- optional artifacts such as a branch or pull request
+
+The built-in Codex executor refuses dirty workspaces, creates an isolated branch, runs `codex exec`, filters internal artifacts, and reports changed files. Third-party runners can implement the same `ExecutorAdapter` contract from `@opentag/runner`.
 
 ## Dispatcher Callback Delivery
 
-Set `OPENTAG_GITHUB_TOKEN` on the dispatcher to let it post acknowledgement, progress, and final callback messages to GitHub comments. When dispatcher callbacks are enabled, set `OPENTAG_DISPATCHER_OWNS_CALLBACKS=true` on the Probot app to avoid duplicate acknowledgement comments.
+Set `OPENTAG_GITHUB_TOKEN` on the dispatcher to post acknowledgement, progress, and final callback messages to GitHub comments.
 
-Set `OPENTAG_SLACK_BOT_TOKEN` on the dispatcher to let it post acknowledgement, progress, and final callback messages to Slack threads via `chat.postMessage`.
+When dispatcher callbacks are enabled, set `OPENTAG_DISPATCHER_OWNS_CALLBACKS=true` on the Probot app to avoid duplicate acknowledgement comments.
 
-Set `OPENTAG_PAIRING_TOKEN` on the dispatcher to require a shared Bearer token for `/v1/*` endpoints. Use the same value as `pairingToken` in `opentagd` config, and set `OPENTAG_DISPATCHER_TOKEN` on the Probot app when it creates runs through the dispatcher.
+Set `OPENTAG_SLACK_BOT_TOKEN` on the dispatcher to post acknowledgement, progress, and final callback messages to Slack threads through `chat.postMessage`.
 
-## Local Runner Config
+Set `OPENTAG_PAIRING_TOKEN` on the dispatcher to require a shared Bearer token for `/v1/*` endpoints. Use the same value as `pairingToken` in `opentagd` config, and set `OPENTAG_DISPATCHER_TOKEN` on ingress apps that create runs through the dispatcher.
 
-`opentagd` can read a JSON config through `OPENTAG_CONFIG_PATH`:
+## Examples
 
-```json
-{
-  "runnerId": "runner_local",
-  "dispatcherUrl": "http://localhost:3030",
-  "pairingToken": "shared_pairing_token",
-  "pollIntervalMs": 5000,
-  "heartbeatIntervalMs": 15000,
-  "repositories": [
-    {
-      "provider": "github",
-      "owner": "acme",
-      "repo": "demo",
-      "checkoutPath": "/Users/example/repos/demo",
-      "defaultExecutor": "codex",
-      "baseBranch": "main",
-      "pushRemote": "origin"
-    }
-  ],
-  "githubToken": "ghs_optional_token_for_pr_creation"
-}
-```
+- [GitHub to echo](examples/github-to-echo/README.md) - manual end-to-end GitHub-shaped smoke test.
+- [Embedded dispatcher](examples/embedded-dispatcher/README.md) - host the dispatcher inside another Node service.
+- [Custom runner](examples/custom-runner/README.md) - build a third-party runner with `@opentag/client` and `@opentag/runner`.
 
-`defaultExecutor` can be `echo` for smoke tests or `codex` for a real local Codex CLI run. If `githubToken` is present and the normalized event grants `pr:create`, `opentagd` pushes the `opentag/<runId>` branch and creates a GitHub pull request after the executor reports changed files.
+## Status
 
-Use `opentagd serve` for the long-running daemon mode. It continuously polls for runs and emits periodic lease heartbeats while an executor is active.
+OpenTag is a young v0 project. The current codebase proves the core loop:
 
-## Slack Setup
+- GitHub and Slack ingress
+- normalized protocol schemas
+- dispatcher persistence and leases
+- local daemon polling and heartbeats
+- echo and Codex executors
+- GitHub and Slack callbacks
+- package-level SDK usage
 
-Slack uses a small ingress service alongside the dispatcher:
+Next areas of work:
 
-- `apps/slack-events` expects `SLACK_SIGNING_SECRET` and `OPENTAG_DISPATCHER_URL`.
-- Set `OPENTAG_DISPATCHER_TOKEN` on `apps/slack-events` when dispatcher pairing-token auth is enabled.
-- Bind a Slack channel to a repo with `opentagd bind-slack-channels` or `POST /v1/slack-channel-bindings`.
-
-After that, an `app_mention` in the bound channel is normalized into an `OpenTagEvent`, routed through the same dispatcher/local-daemon path, and replied to in the same Slack thread.
+- richer hosted setup flow
+- stronger callback delivery observability
+- more executor adapters
+- more workspace adapters
+- production hardening for multi-tenant dispatcher deployments
 
 ## Design
 
-See [docs/design.md](docs/design.md).
+The architecture and product direction are documented in [docs/design.md](docs/design.md). Versioning and publishing rules live in [docs/versioning.md](docs/versioning.md).
 
-The core package also exports JSON Schema definitions as `OpenTagJsonSchemas` for `OpenTagEvent`, `OpenTagRun`, and `OpenTagRunResult`.
+## License
+
+Public OpenTag packages are licensed under Apache-2.0. Runnable apps are private workspace packages for local development and deployment composition.
