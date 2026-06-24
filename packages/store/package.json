@@ -1,0 +1,28 @@
+{
+  "name": "@opentag/store",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentag/core": "workspace:*",
+    "better-sqlite3": "^11.7.0",
+    "drizzle-orm": "^0.38.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  }
+}

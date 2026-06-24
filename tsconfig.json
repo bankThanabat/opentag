@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/github" },
+    { "path": "packages/runner" },
+    { "path": "packages/store" },
+    { "path": "apps/dispatcher" },
+    { "path": "apps/github-probot" },
+    { "path": "apps/opentagd" }
+  ]
+}

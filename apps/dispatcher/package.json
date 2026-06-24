@@ -1,0 +1,27 @@
+{
+  "name": "@opentag/dispatcher",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@opentag/core": "workspace:*",
+    "@opentag/store": "workspace:*",
+    "better-sqlite3": "^11.7.0",
+    "drizzle-orm": "^0.38.3",
+    "hono": "^4.6.15",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "tsx": "^4.19.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  }
+}

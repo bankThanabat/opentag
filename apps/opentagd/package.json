@@ -1,0 +1,24 @@
+{
+  "name": "@opentag/opentagd",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "opentagd": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentag/core": "workspace:*",
+    "@opentag/runner": "workspace:*",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  }
+}

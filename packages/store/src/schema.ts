@@ -1,0 +1,96 @@
+import type Database from "better-sqlite3";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+
+export const runs = sqliteTable(
+  "runs",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id").notNull(),
+    status: text("status").notNull(),
+    eventJson: text("event_json").notNull(),
+    resultJson: text("result_json"),
+    assignedRunnerId: text("assigned_runner_id"),
+    executor: text("executor"),
+    leaseExpiresAt: text("lease_expires_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => ({
+    statusIdx: index("runs_status_idx").on(table.status),
+    runnerIdx: index("runs_runner_idx").on(table.assignedRunnerId)
+  })
+);
+
+export const runEvents = sqliteTable("run_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  runId: text("run_id").notNull(),
+  type: text("type").notNull(),
+  payloadJson: text("payload_json").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
+export const runners = sqliteTable("runners", {
+  runnerId: text("runner_id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: text("created_at").notNull(),
+  heartbeatAt: text("heartbeat_at")
+});
+
+export const repoBindings = sqliteTable(
+  "repo_bindings",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    provider: text("provider").notNull(),
+    owner: text("owner").notNull(),
+    repo: text("repo").notNull(),
+    runnerId: text("runner_id").notNull(),
+    workspacePath: text("workspace_path"),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => ({
+    repoUniqueIdx: uniqueIndex("repo_bindings_provider_owner_repo_idx").on(table.provider, table.owner, table.repo)
+  })
+);
+
+export function migrateSchema(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS runs (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      event_json TEXT NOT NULL,
+      result_json TEXT,
+      assigned_runner_id TEXT,
+      executor TEXT,
+      lease_expires_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS runs_status_idx ON runs(status);
+    CREATE INDEX IF NOT EXISTS runs_runner_idx ON runs(assigned_runner_id);
+    CREATE TABLE IF NOT EXISTS run_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS runners (
+      runner_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      heartbeat_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS repo_bindings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      runner_id TEXT NOT NULL,
+      workspace_path TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS repo_bindings_provider_owner_repo_idx
+      ON repo_bindings(provider, owner, repo);
+  `);
+}
