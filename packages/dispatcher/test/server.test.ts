@@ -78,12 +78,12 @@ describe("dispatcher API", () => {
   });
 
   it("delivers acknowledgement, progress, and final callback messages with audit events", async () => {
-    const delivered: { kind: string; body: string }[] = [];
+    const delivered: { kind: string; body: string; blocks?: unknown[] }[] = [];
     const app = createDispatcherApp({
       databasePath: ":memory:",
       callbackSink: {
         async deliver(message) {
-          delivered.push({ kind: message.kind, body: message.body });
+          delivered.push({ kind: message.kind, body: message.body, ...(message.blocks?.length ? { blocks: message.blocks } : {}) });
         }
       }
     });
@@ -136,6 +136,107 @@ describe("dispatcher API", () => {
       "callback.acknowledgement.delivered",
       "run.progress",
       "callback.progress.delivered",
+      "run.completed",
+      "callback.final.delivered"
+    ]);
+  });
+
+  it("renders Slack callbacks with Slack mrkdwn and keeps progress audit-only", async () => {
+    const delivered: { kind: string; body: string; blocks?: unknown[] }[] = [];
+    const app = createDispatcherApp({
+      databasePath: ":memory:",
+      callbackSink: {
+        async deliver(message) {
+          delivered.push({ kind: message.kind, body: message.body, ...(message.blocks?.length ? { blocks: message.blocks } : {}) });
+        }
+      }
+    });
+
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        workspacePath: "/Users/test/demo",
+        defaultExecutor: "echo"
+      })
+    });
+
+    const slackEvent = {
+      ...validEvent,
+      id: "evt_slack_1",
+      source: "slack",
+      sourceEventId: "Ev123",
+      actor: { provider: "slack", providerUserId: "U123", handle: "U123", organizationId: "T123" },
+      permissions: [{ scope: "chat:postMessage", reason: "reply in thread" }],
+      callback: {
+        provider: "slack",
+        uri: "https://slack.com/api/chat.postMessage",
+        threadKey: "T123|C123|1710000000.000100"
+      }
+    };
+
+    const createResponse = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_slack_1", event: slackEvent })
+    });
+    expect(createResponse.status).toBe(201);
+
+    const progressResponse = await app.request("/v1/runs/run_slack_1/progress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "executor.progress", message: "Echo executor started", at: "2026-06-24T00:00:01.000Z" })
+    });
+    expect(progressResponse.status).toBe(200);
+    const completeResponse = await app.request("/v1/runs/run_slack_1/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        result: {
+          conclusion: "success",
+          summary: "Echoed OpenTag command: introduce yourself",
+          verification: [{ command: "echo", outcome: "passed" }]
+        }
+      })
+    });
+    expect(completeResponse.status).toBe(200);
+
+    expect(delivered).toEqual([
+      { kind: "acknowledgement", body: "I picked this up: `run_slack_1`" },
+      {
+        kind: "final",
+        body: "Finished with *success*.\n\nEchoed OpenTag command: introduce yourself\n\n*Verification*\n- `echo`: passed",
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "*Finished with success.*\nEchoed OpenTag command: introduce yourself"
+            }
+          },
+          { type: "divider" },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "*Verification*\n- `echo`: passed"
+            }
+          }
+        ]
+      }
+    ]);
+    expect(delivered.at(-1)?.body).not.toContain("**success**");
+
+    const eventsResponse = await app.request("/v1/runs/run_slack_1/events");
+    const { events } = await eventsResponse.json();
+    expect(events.map((event: { type: string }) => event.type)).toEqual([
+      "run.created",
+      "callback.acknowledgement.delivered",
+      "run.progress",
       "run.completed",
       "callback.final.delivered"
     ]);

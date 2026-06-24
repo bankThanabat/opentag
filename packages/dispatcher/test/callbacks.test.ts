@@ -88,6 +88,119 @@ describe("createGitHubCallbackSink", () => {
     ]);
   });
 
+  it("edits an existing Slack status message when statusMessageKey repeats", async () => {
+    const requests: { url: string; body: unknown; authorization: string | null }[] = [];
+    const sink = createSlackCallbackSink({
+      botToken: "xoxb-test",
+      fetchImpl: (async (url, init) => {
+        const body = JSON.parse(String(init?.body));
+        requests.push({
+          url: String(url),
+          body,
+          authorization: new Headers(init?.headers).get("authorization")
+        });
+        if (String(url).endsWith("/chat.postMessage")) {
+          return Response.json({ ok: true, ts: "1720000000.000100" });
+        }
+        return Response.json({ ok: true, ts: body.ts });
+      }) as typeof fetch
+    });
+
+    await sink.deliver({
+      runId: "run_1",
+      kind: "progress",
+      provider: "slack",
+      uri: "https://slack.com/api/chat.postMessage",
+      threadKey: "T123|C123|1710000000.000100",
+      body: "Starting",
+      statusMessageKey: "run_1:status"
+    });
+    await sink.deliver({
+      runId: "run_1",
+      kind: "progress",
+      provider: "slack",
+      uri: "https://slack.com/api/chat.postMessage",
+      threadKey: "T123|C123|1710000000.000100",
+      body: "Still working",
+      statusMessageKey: "run_1:status"
+    });
+
+    expect(requests).toEqual([
+      {
+        url: "https://slack.com/api/chat.postMessage",
+        authorization: "Bearer xoxb-test",
+        body: {
+          channel: "C123",
+          text: "Starting",
+          thread_ts: "1710000000.000100"
+        }
+      },
+      {
+        url: "https://slack.com/api/chat.update",
+        authorization: "Bearer xoxb-test",
+        body: {
+          channel: "C123",
+          text: "Still working",
+          ts: "1720000000.000100"
+        }
+      }
+    ]);
+  });
+
+  it("includes Slack blocks when present", async () => {
+    const requests: { url: string; body: unknown; authorization: string | null }[] = [];
+    const sink = createSlackCallbackSink({
+      botToken: "xoxb-test",
+      fetchImpl: (async (url, init) => {
+        requests.push({
+          url: String(url),
+          body: JSON.parse(String(init?.body)),
+          authorization: new Headers(init?.headers).get("authorization")
+        });
+        return Response.json({ ok: true, ts: "1720000000.000100" });
+      }) as typeof fetch
+    });
+
+    await sink.deliver({
+      runId: "run_1",
+      kind: "final",
+      provider: "slack",
+      uri: "https://slack.com/api/chat.postMessage",
+      threadKey: "T123|C123|1710000000.000100",
+      body: "**done**",
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "*done*"
+          }
+        }
+      ]
+    });
+
+    expect(requests).toEqual([
+      {
+        url: "https://slack.com/api/chat.postMessage",
+        authorization: "Bearer xoxb-test",
+        body: {
+          channel: "C123",
+          text: "*done*",
+          thread_ts: "1710000000.000100",
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: "*done*"
+              }
+            }
+          ]
+        }
+      }
+    ]);
+  });
+
   it("fans out across composed sinks", async () => {
     const messages: string[] = [];
     const sink = createCompositeCallbackSink([
