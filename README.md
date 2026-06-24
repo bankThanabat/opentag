@@ -10,20 +10,16 @@
 
 Claude Tag showed the new interface for team AI: tag an agent where work is already happening, let it use the right tools, and get the result back in the thread.
 
-Tag agents from GitHub, Slack, or your own workspace surface. OpenTag adds bounded context, explicit permissions, auditable execution, and local-first runners when you need them.
+Mention a configured agent where work already happens. OpenTag adds bounded context, explicit permissions, auditable execution, and local-first runners when you need them.
 
 OpenTag is not another AI workspace. It is the protocol layer that brings agents to the work item thread you already use.
 
 > OpenTag is not affiliated with Anthropic. It is an open implementation of the agent-mention workflow that Claude Tag made obvious.
 
-```mermaid
-flowchart LR
-  A["GitHub or Slack mention"] --> B["OpenTag event"]
-  B --> C["Hosted or embedded dispatcher"]
-  C --> D["Bound local daemon"]
-  D --> E["Claude Code, Codex, or custom runner"]
-  E --> F["Proposal, PR, callback, metrics"]
-```
+1. Mention a configured agent where work already happens (for example, GitHub or Slack).
+2. OpenTag normalizes the event and builds bounded context.
+3. An approved runner brings in Claude Code, Codex, or your own agent.
+4. The source thread gets a quiet result: proposal, PR, or metrics.
 
 Real smoke tests have validated:
 
@@ -38,7 +34,7 @@ OpenTag is for developers and teams who want the same interaction model with ope
 
 | Claude Tag pattern | OpenTag approach |
 | --- | --- |
-| Tag `@Claude` in Slack | Tag `@opentag` from GitHub, Slack, or another adapter |
+| Tag `@Claude` in Slack | Mention any configured agent from GitHub, Slack, or another adapter |
 | Claude executes with configured tools | Any approved executor can run: Claude Code, Codex, Hermes, OpenClaw, or custom |
 | Agent identity is provisioned by admins | Repository and channel bindings are explicit, auditable records |
 | Work happens inside Anthropic's product boundary | Dispatch can be self-hosted, embedded, or pointed at local runners |
@@ -50,7 +46,7 @@ The goal is simple: make "tag an agent into work" a protocol, not a closed surfa
 
 ### Core Loop
 
-- **GitHub and Slack ingress** - issue comments, PR review comments, and Slack app mentions normalize into one `OpenTagEvent`.
+- **GitHub and Slack adapters** - issue comments, PR review comments, and Slack app mentions normalize into one `OpenTagEvent` today; other workspace surfaces can implement the same protocol.
 - **Local-first execution** - `opentagd` claims only explicitly bound repositories and runs in your local checkout.
 - **Built-in local executors** - `echo` for smoke tests, `claude-code` for `claude --print`, and `codex` for `codex exec`.
 - **Quiet callbacks** - Slack progress stays audit-only by default; GitHub updates one run comment in place.
