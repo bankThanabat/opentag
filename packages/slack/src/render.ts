@@ -44,7 +44,7 @@ export function renderSlackAcknowledgement(runId: string): string {
 }
 
 export function renderSlackFinalResult(result: OpenTagRunResult): string {
-  const lines = [`Finished with *${result.conclusion}*.`, "", result.summary];
+  const lines = [`Finished with *${result.conclusion}*.`, "", markdownToSlackMrkdwn(result.summary)];
 
   if (result.verification?.length) {
     lines.push("", "*Verification*");
@@ -54,7 +54,7 @@ export function renderSlackFinalResult(result: OpenTagRunResult): string {
   }
 
   if (result.nextAction) {
-    lines.push("", `*Next action*: ${result.nextAction}`);
+    lines.push("", `*Next action*: ${markdownToSlackMrkdwn(result.nextAction)}`);
   }
 
   return lines.join("\n");

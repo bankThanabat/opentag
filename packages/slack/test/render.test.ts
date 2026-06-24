@@ -16,11 +16,14 @@ describe("Slack callback rendering", () => {
   it("uses Slack mrkdwn for final results", () => {
     const text = renderSlackFinalResult({
       conclusion: "success",
-      summary: "Echoed OpenTag command: introduce yourself",
-      verification: [{ command: "echo", outcome: "passed" }]
+      summary: "Echoed **OpenTag** command: [introduce yourself](https://example.com/cmd)",
+      verification: [{ command: "echo", outcome: "passed" }],
+      nextAction: "Open [thread](https://example.com/thread) & follow up"
     });
 
-    expect(text).toBe("Finished with *success*.\n\nEchoed OpenTag command: introduce yourself\n\n*Verification*\n- `echo`: passed");
+    expect(text).toBe(
+      "Finished with *success*.\n\nEchoed *OpenTag* command: <https://example.com/cmd|introduce yourself>\n\n*Verification*\n- `echo`: passed\n\n*Next action*: Open <https://example.com/thread|thread> &amp; follow up"
+    );
     expect(text).not.toContain("**success**");
   });
 
