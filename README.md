@@ -232,7 +232,7 @@ It returns:
 - verification results
 - optional artifacts such as a branch or pull request
 
-The built-in Codex executor refuses dirty workspaces, creates an isolated branch, runs `codex exec`, filters internal artifacts, and reports changed files. Third-party runners can implement the same `ExecutorAdapter` contract from `@opentag/runner`.
+The built-in Codex and Claude Code executors refuse dirty workspaces, create an isolated branch, run the local CLI (`codex exec` or `claude --print`), filter internal artifacts, and report changed files. Third-party runners can implement the same `ExecutorAdapter` contract from `@opentag/runner`.
 
 ## Dispatcher Callback Delivery
 

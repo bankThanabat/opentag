@@ -1,11 +1,26 @@
 #!/usr/bin/env node
-import { createCodexExecutor, createEchoExecutor } from "@opentag/runner";
+import { createClaudeCodeExecutor, createCodexExecutor, createEchoExecutor } from "@opentag/runner";
 import { createDispatcherAdminClient, createDispatcherClient } from "@opentag/client";
 import { Command } from "commander";
 import { loadConfigFromEnv } from "./config.js";
 import { runOneDaemonIteration, serveDaemon } from "./daemon.js";
 
 const program = new Command();
+
+function executorsFromConfig(config: ReturnType<typeof loadConfigFromEnv>) {
+  return {
+    echo: createEchoExecutor(),
+    codex: createCodexExecutor(),
+    "claude-code": createClaudeCodeExecutor({
+      ...(config.claudeCode?.command ? { claudeCommand: config.claudeCode.command } : {}),
+      ...(config.claudeCode?.model ? { model: config.claudeCode.model } : {}),
+      ...(config.claudeCode?.permissionMode ? { permissionMode: config.claudeCode.permissionMode } : {}),
+      ...(config.claudeCode?.dangerouslySkipPermissions !== undefined
+        ? { dangerouslySkipPermissions: config.claudeCode.dangerouslySkipPermissions }
+        : {})
+    })
+  };
+}
 
 program
   .name("opentagd")
@@ -70,10 +85,7 @@ program
     const didWork = await runOneDaemonIteration({
       runnerId: config.runnerId,
       repositories: config.repositories,
-      executors: {
-        echo: createEchoExecutor(),
-        codex: createCodexExecutor()
-      },
+      executors: executorsFromConfig(config),
       pullRequestOptions: {
         ...(config.githubToken ? { githubToken: config.githubToken } : {})
       },
@@ -95,10 +107,7 @@ program
     await serveDaemon({
       runnerId: config.runnerId,
       repositories: config.repositories,
-      executors: {
-        echo: createEchoExecutor(),
-        codex: createCodexExecutor()
-      },
+      executors: executorsFromConfig(config),
       ...(config.githubToken ? { pullRequestOptions: { githubToken: config.githubToken } } : {}),
       ...(config.heartbeatIntervalMs ? { heartbeatIntervalMs: config.heartbeatIntervalMs } : {}),
       ...(config.pollIntervalMs ? { pollIntervalMs: config.pollIntervalMs } : {}),

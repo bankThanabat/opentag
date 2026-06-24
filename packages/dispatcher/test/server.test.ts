@@ -77,6 +77,31 @@ describe("dispatcher API", () => {
     expect(binding.binding).toMatchObject({ runnerId: "runner_1", workspacePath: "/Users/test/demo" });
   });
 
+  it("stores and returns repo policy rules", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+    const response = await app.request("/v1/repo-bindings/github/acme/demo/policy-rules", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        rule: {
+          id: "repo_allows_labels",
+          scope: "work_context_owner_container",
+          effect: "allow",
+          capabilityId: "set_labels",
+          reason: "Repo allows approved label changes."
+        }
+      })
+    });
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({ rule: { id: "repo_allows_labels" } });
+
+    const listResponse = await app.request("/v1/repo-bindings/github/acme/demo/policy-rules");
+    expect(listResponse.status).toBe(200);
+    await expect(listResponse.json()).resolves.toMatchObject({
+      rules: [{ id: "repo_allows_labels", effect: "allow" }]
+    });
+  });
+
   it("delivers acknowledgement, progress, and final callback messages with audit events", async () => {
     const delivered: { kind: string; body: string; blocks?: unknown[] }[] = [];
     const app = createDispatcherApp({
@@ -375,6 +400,18 @@ describe("dispatcher API", () => {
     expect(events.map((event: { type: string }) => event.type)).toEqual(
       expect.arrayContaining(["proposal.snapshot.created", "approval.decision.recorded", "apply_plan.created"])
     );
+
+    const metricsResponse = await app.request("/v1/runs/run_protocol/metrics");
+    expect(metricsResponse.status).toBe(200);
+    await expect(metricsResponse.json()).resolves.toMatchObject({
+      metrics: {
+        runId: "run_protocol",
+        suggestedChangesCount: 1,
+        approvalDecisionCount: 1,
+        applyPlanCount: 1,
+        applyOutcomeCounts: { skipped: 1 }
+      }
+    });
   });
 
   it("creates child runs from next action hints with lineage fields", async () => {

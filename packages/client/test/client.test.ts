@@ -177,4 +177,78 @@ describe("@opentag/client", () => {
       }
     ]);
   });
+
+  it("calls repo policy rule endpoints", async () => {
+    const requests: Array<{ url: string; method: string; body?: unknown }> = [];
+    const client = createOpenTagClient({
+      dispatcherUrl: "http://dispatcher.test",
+      fetchImpl: async (url, init) => {
+        requests.push({
+          url: String(url),
+          method: init?.method ?? "GET",
+          ...(init?.body ? { body: JSON.parse(String(init.body)) } : {})
+        });
+        if (init?.method === "POST") {
+          return jsonResponse({
+            rule: {
+              id: "repo_allows_labels",
+              scope: "work_context_owner_container",
+              effect: "allow",
+              capabilityId: "set_labels",
+              reason: "Repo allows labels."
+            }
+          }, 201);
+        }
+        return jsonResponse({
+          rules: [
+            {
+              id: "repo_allows_labels",
+              scope: "work_context_owner_container",
+              effect: "allow",
+              capabilityId: "set_labels",
+              reason: "Repo allows labels."
+            }
+          ]
+        });
+      }
+    });
+
+    await expect(
+      client.upsertRepoPolicyRule({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        rule: {
+          id: "repo_allows_labels",
+          scope: "work_context_owner_container",
+          effect: "allow",
+          capabilityId: "set_labels",
+          reason: "Repo allows labels."
+        }
+      })
+    ).resolves.toMatchObject({ rule: { id: "repo_allows_labels" } });
+    await expect(client.listRepoPolicyRules({ provider: "github", owner: "acme", repo: "demo" })).resolves.toMatchObject({
+      rules: [{ id: "repo_allows_labels" }]
+    });
+
+    expect(requests).toEqual([
+      {
+        url: "http://dispatcher.test/v1/repo-bindings/github/acme/demo/policy-rules",
+        method: "POST",
+        body: {
+          rule: {
+            id: "repo_allows_labels",
+            scope: "work_context_owner_container",
+            effect: "allow",
+            capabilityId: "set_labels",
+            reason: "Repo allows labels."
+          }
+        }
+      },
+      {
+        url: "http://dispatcher.test/v1/repo-bindings/github/acme/demo/policy-rules",
+        method: "GET"
+      }
+    ]);
+  });
 });

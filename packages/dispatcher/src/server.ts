@@ -4,6 +4,7 @@ import {
   type OpenTagEvent,
   OpenTagEventSchema,
   OpenTagRunResultSchema,
+  PolicyRuleSchema,
   RunEventImportanceSchema,
   RunEventVisibilitySchema
 } from "@opentag/core";
@@ -36,6 +37,10 @@ const CreateSlackChannelBindingSchema = z.object({
   channelId: z.string().min(1),
   owner: z.string().min(1),
   repo: z.string().min(1)
+});
+
+const UpsertPolicyRuleSchema = z.object({
+  rule: PolicyRuleSchema
 });
 
 const CreateRunSchema = z.object({
@@ -222,6 +227,26 @@ export function createDispatcherApp(input: {
     });
     if (!binding) return c.json({ error: "repo_binding_not_found" }, 404);
     return c.json({ binding });
+  });
+
+  app.post("/v1/repo-bindings/:provider/:owner/:repo/policy-rules", async (c) => {
+    const parsed = UpsertPolicyRuleSchema.parse(await c.req.json());
+    const rule = await repo.upsertRepoPolicyRule({
+      provider: c.req.param("provider"),
+      owner: c.req.param("owner"),
+      repo: c.req.param("repo"),
+      rule: parsed.rule
+    });
+    return c.json({ rule }, 201);
+  });
+
+  app.get("/v1/repo-bindings/:provider/:owner/:repo/policy-rules", async (c) => {
+    const rules = await repo.listRepoPolicyRules({
+      provider: c.req.param("provider"),
+      owner: c.req.param("owner"),
+      repo: c.req.param("repo")
+    });
+    return c.json({ rules });
   });
 
   app.post("/v1/slack-channel-bindings", async (c) => {
@@ -475,6 +500,14 @@ export function createDispatcherApp(input: {
     const stored = await repo.getRun({ runId: c.req.param("runId") });
     if (!stored) return c.json({ error: "run_not_found" }, 404);
     return c.json(stored);
+  });
+
+  app.get("/v1/runs/:runId/metrics", async (c) => {
+    const runId = c.req.param("runId");
+    const stored = await repo.getRun({ runId });
+    if (!stored) return c.json({ error: "run_not_found" }, 404);
+    const metrics = await repo.getRunMetrics({ runId });
+    return c.json({ metrics });
   });
 
   app.get("/v1/runs/:runId/events", async (c) => {

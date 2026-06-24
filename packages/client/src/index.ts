@@ -10,6 +10,7 @@ import {
   type OpenTagEvent,
   type OpenTagRun,
   type OpenTagRunResult,
+  type PolicyRule,
   type ProposalLineage,
   type RunEventImportance,
   type RunEventVisibility,
@@ -96,10 +97,34 @@ export type ChildRunInput = {
   sourceApplyPlanId?: string;
 };
 
+export type RunMetrics = {
+  runId: string;
+  totalEventCount: number;
+  humanEventCount: number;
+  auditEventCount: number;
+  debugEventCount: number;
+  humanCallbackCount: number;
+  threadNoiseRatio: number;
+  suggestedChangesCount: number;
+  approvalDecisionCount: number;
+  applyPlanCount: number;
+  childRunCount: number;
+  applyOutcomeCounts: {
+    applied: number;
+    skipped: number;
+    failed: number;
+    stale: number;
+    unsupported: number;
+  };
+  staleIntentCount: number;
+};
+
 export type OpenTagClient = {
   registerRunner(input: { runnerId: string; name?: string }): Promise<void>;
   bindRepository(input: RepoBindingInput): Promise<void>;
   getRepositoryBinding(input: { provider: string; owner: string; repo: string }): Promise<{ binding: RepoBindingInput }>;
+  upsertRepoPolicyRule(input: { provider: string; owner: string; repo: string; rule: PolicyRule }): Promise<{ rule: PolicyRule }>;
+  listRepoPolicyRules(input: { provider: string; owner: string; repo: string }): Promise<{ rules: PolicyRule[] }>;
   bindSlackChannel(input: SlackChannelBindingInput): Promise<void>;
   getSlackChannelBinding(input: { teamId: string; channelId: string }): Promise<{ binding: SlackChannelBindingInput }>;
   createRun(input: CreateRunInput): Promise<{ run: OpenTagRun }>;
@@ -110,6 +135,7 @@ export type OpenTagClient = {
   complete(input: { runId: string; result: OpenTagRunResult }): Promise<void>;
   getRun(input: { runId: string }): Promise<ClaimedOpenTagRun>;
   listRunEvents(input: { runId: string }): Promise<{ events: unknown[] }>;
+  getRunMetrics(input: { runId: string }): Promise<{ metrics: RunMetrics }>;
   getProposal(input: { proposalId: string }): Promise<{ runId: string; snapshot: SuggestedChangesSnapshot }>;
   getProposalLineage(input: { proposalId: string }): Promise<{ lineage: ProposalLineage }>;
   listCurrentMutationIntents(input: { proposalId: string }): Promise<{ intents: MutationIntentActionability[] }>;
@@ -183,6 +209,24 @@ export function createOpenTagClient(options: OpenTagClientOptions): OpenTagClien
       });
       await assertOk(response, "getRepositoryBinding");
       return (await response.json()) as { binding: RepoBindingInput };
+    },
+
+    async upsertRepoPolicyRule(input) {
+      const response = await fetchImpl(`${baseUrl}/v1/repo-bindings/${input.provider}/${input.owner}/${input.repo}/policy-rules`, {
+        method: "POST",
+        headers: jsonHeaders(options.pairingToken),
+        body: JSON.stringify({ rule: input.rule })
+      });
+      await assertOk(response, "upsertRepoPolicyRule");
+      return (await response.json()) as { rule: PolicyRule };
+    },
+
+    async listRepoPolicyRules(input) {
+      const response = await fetchImpl(`${baseUrl}/v1/repo-bindings/${input.provider}/${input.owner}/${input.repo}/policy-rules`, {
+        headers: authHeaders(options.pairingToken)
+      });
+      await assertOk(response, "listRepoPolicyRules");
+      return (await response.json()) as { rules: PolicyRule[] };
     },
 
     async bindSlackChannel(input) {
@@ -280,6 +324,14 @@ export function createOpenTagClient(options: OpenTagClientOptions): OpenTagClien
       });
       await assertOk(response, "listRunEvents");
       return (await response.json()) as { events: unknown[] };
+    },
+
+    async getRunMetrics(input) {
+      const response = await fetchImpl(`${baseUrl}/v1/runs/${input.runId}/metrics`, {
+        headers: authHeaders(options.pairingToken)
+      });
+      await assertOk(response, "getRunMetrics");
+      return (await response.json()) as { metrics: RunMetrics };
     },
 
     async getProposal(input) {

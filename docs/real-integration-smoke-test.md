@@ -65,7 +65,32 @@ Create a local runner config that binds the repository you want to test:
 }
 ```
 
-Start with `"defaultExecutor": "echo"` until the end-to-end callback loop is proven. Switch to `"codex"` only after GitHub or Slack replies are working.
+Start with `"defaultExecutor": "echo"` until the end-to-end callback loop is proven. Switch to `"codex"` or `"claude-code"` only after GitHub or Slack replies are working.
+
+For Claude Code, set the repository binding to:
+
+```json
+"defaultExecutor": "claude-code"
+```
+
+Optional daemon-level Claude Code settings can be added to the same config:
+
+```json
+"claudeCode": {
+  "command": "claude",
+  "permissionMode": "acceptEdits"
+}
+```
+
+You can also configure these through environment variables:
+
+```bash
+OPENTAG_CLAUDE_COMMAND=claude
+OPENTAG_CLAUDE_MODEL=sonnet
+OPENTAG_CLAUDE_PERMISSION_MODE=acceptEdits
+```
+
+`OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=true` is supported for explicitly sandboxed environments, but it is not enabled by default.
 
 ## GitHub Smoke Test
 
@@ -309,3 +334,20 @@ When something is broken, debug in this order:
 ## Recommendation
 
 For real integration work, keep two separate public tunnels or be deliberate about switching one tunnel between GitHub and Slack. Reusing the same public hostname across both ports is possible, but it is an easy way to lose half an hour to the wrong endpoint.
+
+## Combined GitHub + Slack + Claude Code Stack
+
+After the individual GitHub and Slack paths work, you can run both ingress services against one local Claude Code daemon:
+
+```bash
+OPENTAG_CONFIG_PATH=/absolute/path/to/opentag.real.json \
+OPENTAG_GITHUB_TOKEN=<github-token> \
+OPENTAG_SLACK_BOT_TOKEN=<xoxb-token> \
+SLACK_SIGNING_SECRET=<signing-secret> \
+APP_ID=<github-app-id> \
+WEBHOOK_SECRET=<github-webhook-secret> \
+PRIVATE_KEY_PATH=/absolute/path/to/github-app.private-key.pem \
+scripts/dev/start-github-slack-claude-test.sh
+```
+
+The config file should bind the target repository and Slack channel, and the repository binding should use `"defaultExecutor": "claude-code"`.

@@ -315,6 +315,112 @@ describe("OpenTag repository", () => {
         expect.objectContaining({ metric: "external_write_approval_rate" })
       ])
     );
+
+    const metrics = await repo.getRunMetrics({ runId: "run_protocol" });
+    expect(metrics).toMatchObject({
+      runId: "run_protocol",
+      humanCallbackCount: 0,
+      suggestedChangesCount: 1,
+      approvalDecisionCount: 1,
+      applyPlanCount: 1,
+      childRunCount: 0,
+      applyOutcomeCounts: {
+        applied: 0,
+        skipped: 1,
+        failed: 0,
+        stale: 0,
+        unsupported: 0
+      },
+      staleIntentCount: 0
+    });
+  });
+
+  it("uses repo policy rules during apply preflight", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.upsertRepoPolicyRule({
+      provider: "github",
+      owner: "acme",
+      repo: "demo",
+      rule: {
+        id: "deny_labels_from_primary_anchor",
+        scope: "primary_anchor_override",
+        effect: "deny",
+        capabilityId: "set_labels",
+        reason: "Repo policy denies label mutation for this anchor."
+      }
+    });
+    await expect(repo.listRepoPolicyRules({ provider: "github", owner: "acme", repo: "demo" })).resolves.toEqual([
+      expect.objectContaining({ id: "deny_labels_from_primary_anchor", effect: "deny" })
+    ]);
+
+    await repo.createRun({
+      id: "run_policy",
+      event: {
+        id: "evt_policy",
+        source: "github",
+        sourceEventId: "comment_policy",
+        receivedAt: "2026-06-24T00:00:00.000Z",
+        actor: { provider: "github", providerUserId: "42", handle: "octocat" },
+        target: { mention: "@opentag", agentId: "opentag" },
+        command: { rawText: "label this", intent: "run", args: {} },
+        context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/4", visibility: "public" }],
+        permissions: [
+          { scope: "issue:comment", reason: "reply to source thread" },
+          { scope: "repo:write", reason: "mutate labels after approval" }
+        ],
+        callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/4/comments" },
+        metadata: { owner: "acme", repo: "demo", issueNumber: 4 }
+      }
+    });
+    await repo.completeRun({
+      runId: "run_policy",
+      result: {
+        conclusion: "needs_human",
+        summary: "Prepared label proposal.",
+        suggestedChanges: [
+          {
+            proposalId: "proposal_policy",
+            createdAt: "2026-06-24T00:00:01.000Z",
+            summary: "Add blocked label.",
+            intents: [
+              {
+                intentId: "intent_label_blocked",
+                domain: "labels",
+                action: "add_label",
+                summary: "Add blocked label.",
+                params: { label: "blocked" }
+              }
+            ]
+          }
+        ]
+      }
+    });
+    await repo.recordApprovalDecision({
+      id: "approval_policy",
+      proposalId: "proposal_policy",
+      approvedIntentIds: ["intent_label_blocked"],
+      approvedBy: { provider: "github", providerUserId: "42", handle: "octocat" },
+      approvedAt: "2026-06-24T00:00:02.000Z",
+      scope: "manual"
+    });
+
+    const plan = await repo.createApplyPlan({
+      id: "apply_policy",
+      proposalId: "proposal_policy",
+      approvalDecisionId: "approval_policy"
+    });
+
+    expect(plan?.outcomes).toEqual([
+      expect.objectContaining({
+        intentId: "intent_label_blocked",
+        outcome: "unsupported",
+        message: "OpenTag policy denied capability set_labels: Repo policy denies label mutation for this anchor."
+      })
+    ]);
   });
 
   it("computes domain-scoped proposal supersession", async () => {

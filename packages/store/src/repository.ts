@@ -5,6 +5,7 @@ import {
   ActionHintSchema,
   OpenTagEventSchema,
   OpenTagRunResultSchema,
+  PolicyRuleSchema,
   ProposalLineageSchema,
   preflightMutationIntent,
   protocolRunFieldsFromEvent,
@@ -27,7 +28,17 @@ import {
 } from "@opentag/core";
 import { and, asc, eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { applyPlans, approvalDecisions, repoBindings, runEvents, runners, runs, slackChannelBindings, suggestedChanges } from "./schema.js";
+import {
+  applyPlans,
+  approvalDecisions,
+  repoBindings,
+  repoPolicyRules,
+  runEvents,
+  runners,
+  runs,
+  slackChannelBindings,
+  suggestedChanges
+} from "./schema.js";
 
 export type ClaimedOpenTagRun = {
   run: OpenTagRun;
@@ -65,6 +76,30 @@ export type SlackChannelBinding = {
 export type StoredSuggestedChangesSnapshot = {
   runId: string;
   snapshot: SuggestedChangesSnapshot;
+};
+
+export type ApplyOutcomeCounts = {
+  applied: number;
+  skipped: number;
+  failed: number;
+  stale: number;
+  unsupported: number;
+};
+
+export type OpenTagRunMetrics = {
+  runId: string;
+  totalEventCount: number;
+  humanEventCount: number;
+  auditEventCount: number;
+  debugEventCount: number;
+  humanCallbackCount: number;
+  threadNoiseRatio: number;
+  suggestedChangesCount: number;
+  approvalDecisionCount: number;
+  applyPlanCount: number;
+  childRunCount: number;
+  applyOutcomeCounts: ApplyOutcomeCounts;
+  staleIntentCount: number;
 };
 
 function nowIso(): string {
@@ -204,6 +239,62 @@ function computeProposalLineage(snapshots: StoredSuggestedChangesSnapshot[], tar
   return ProposalLineageSchema.parse({ scopeKey: targetScopeKey, entries });
 }
 
+function emptyApplyOutcomeCounts(): ApplyOutcomeCounts {
+  return {
+    applied: 0,
+    skipped: 0,
+    failed: 0,
+    stale: 0,
+    unsupported: 0
+  };
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function metricsFromEvents(runId: string, events: OpenTagAuditEvent[]): OpenTagRunMetrics {
+  const latestApplyPlans = new Map<string, ApplyPlan>();
+  for (const event of events) {
+    if (event.type !== "apply_plan.created" && event.type !== "apply_plan.executed") continue;
+    const parsed = ApplyPlanSchema.safeParse(event.payload);
+    if (parsed.success) {
+      latestApplyPlans.set(parsed.data.id, parsed.data);
+    }
+  }
+
+  const applyOutcomeCounts = emptyApplyOutcomeCounts();
+  for (const plan of latestApplyPlans.values()) {
+    for (const outcome of plan.outcomes ?? []) {
+      applyOutcomeCounts[outcome.outcome] += 1;
+    }
+  }
+
+  const humanCallbackCount = events.filter((event) => event.visibility === "human" && event.type.startsWith("callback.")).length;
+  const auditEventCount = events.filter((event) => event.visibility === "audit").length;
+  return {
+    runId,
+    totalEventCount: events.length,
+    humanEventCount: events.filter((event) => event.visibility === "human").length,
+    auditEventCount,
+    debugEventCount: events.filter((event) => event.visibility === "debug").length,
+    humanCallbackCount,
+    threadNoiseRatio: auditEventCount === 0 ? humanCallbackCount : humanCallbackCount / auditEventCount,
+    suggestedChangesCount: events
+      .filter((event) => event.type === "proposal.snapshot.created")
+      .reduce((count, event) => {
+        const payload = recordFromUnknown(event.payload);
+        const intents = payload?.["intents"];
+        return count + (Array.isArray(intents) ? intents.length : 1);
+      }, 0),
+    approvalDecisionCount: events.filter((event) => event.type === "approval.decision.recorded").length,
+    applyPlanCount: latestApplyPlans.size,
+    childRunCount: events.filter((event) => event.type === "run.child_created").length,
+    applyOutcomeCounts,
+    staleIntentCount: applyOutcomeCounts.stale
+  };
+}
+
 export function createOpenTagRepository(db: BetterSQLite3Database) {
   async function appendRunEvent(input: {
     runId: string;
@@ -260,6 +351,41 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
             allowedActorsJson: input.allowedActors ? JSON.stringify(input.allowedActors) : null
           }
         });
+    },
+
+    async upsertRepoPolicyRule(input: { provider: string; owner: string; repo: string; rule: PolicyRule }): Promise<PolicyRule> {
+      const rule = PolicyRuleSchema.parse(input.rule);
+      const createdAt = nowIso();
+      await db
+        .insert(repoPolicyRules)
+        .values({
+          id: rule.id,
+          provider: input.provider,
+          owner: input.owner,
+          repo: input.repo,
+          ruleJson: JSON.stringify(rule),
+          createdAt
+        })
+        .onConflictDoUpdate({
+          target: repoPolicyRules.id,
+          set: {
+            provider: input.provider,
+            owner: input.owner,
+            repo: input.repo,
+            ruleJson: JSON.stringify(rule),
+            createdAt
+          }
+        });
+      return rule;
+    },
+
+    async listRepoPolicyRules(input: { provider: string; owner: string; repo: string }): Promise<PolicyRule[]> {
+      const rows = await db
+        .select()
+        .from(repoPolicyRules)
+        .where(and(eq(repoPolicyRules.provider, input.provider), eq(repoPolicyRules.owner, input.owner), eq(repoPolicyRules.repo, input.repo)))
+        .orderBy(asc(repoPolicyRules.createdAt));
+      return rows.map((row) => PolicyRuleSchema.parse(JSON.parse(row.ruleJson)));
     },
 
     async createSlackChannelBinding(input: SlackChannelBinding): Promise<void> {
@@ -717,6 +843,15 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       const runRow = await db.select().from(runs).where(eq(runs.id, storedProposal.runId)).limit(1).get();
       if (!runRow) return null;
       const event = OpenTagEventSchema.parse(JSON.parse(runRow.eventJson));
+      const repoKey = repoKeyFromEvent(event);
+      const storedPolicyRuleRows = repoKey
+        ? await db
+            .select()
+            .from(repoPolicyRules)
+            .where(and(eq(repoPolicyRules.provider, repoKey.provider), eq(repoPolicyRules.owner, repoKey.owner), eq(repoPolicyRules.repo, repoKey.repo)))
+            .orderBy(asc(repoPolicyRules.createdAt))
+        : [];
+      const storedPolicyRules = storedPolicyRuleRows.map((row) => PolicyRuleSchema.parse(JSON.parse(row.ruleJson)));
       const selectedIntentIds = input.selectedIntentIds ?? decision.approvedIntentIds;
       const approvedIntentIds = new Set(decision.approvedIntentIds);
       const proposalIntents = new Map(storedProposal.snapshot.intents.map((intent) => [intent.intentId, intent]));
@@ -729,7 +864,7 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         lineageScopeKey(storedProposal)
       );
       const actionabilityByIntentId = new Map(lineage.entries.map((entry) => [entry.intentId, entry]));
-      const policyRules = [...(input.policyRules ?? []), ...syntheticManualApprovalPolicyRules(decision)];
+      const policyRules = [...storedPolicyRules, ...(input.policyRules ?? []), ...syntheticManualApprovalPolicyRules(decision)];
 
       const outcomes = selectedIntentIds.map((intentId) => {
         if (!approvedIntentIds.has(intentId)) {
@@ -894,6 +1029,21 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         payload: JSON.parse(row.payloadJson) as unknown,
         createdAt: row.createdAt
       }));
+    },
+
+    async getRunMetrics(input: { runId: string }): Promise<OpenTagRunMetrics> {
+      const rows = await db.select().from(runEvents).where(eq(runEvents.runId, input.runId)).orderBy(asc(runEvents.id));
+      const events = rows.map((row) => ({
+        id: row.id,
+        runId: row.runId,
+        type: row.type,
+        visibility: RunEventVisibilitySchema.parse(row.visibility),
+        importance: RunEventImportanceSchema.parse(row.importance),
+        ...(row.message ? { message: row.message } : {}),
+        payload: JSON.parse(row.payloadJson) as unknown,
+        createdAt: row.createdAt
+      }));
+      return metricsFromEvents(input.runId, events);
     }
   };
 }

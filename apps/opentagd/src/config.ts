@@ -10,6 +10,13 @@ export type RepositoryBindingConfig = {
   pushRemote?: string;
 };
 
+export type ClaudeCodeExecutorConfig = {
+  command?: string;
+  model?: string;
+  permissionMode?: "acceptEdits" | "auto" | "bypassPermissions" | "default" | "plan";
+  dangerouslySkipPermissions?: boolean;
+};
+
 export type SlackChannelBindingConfig = {
   teamId: string;
   channelId: string;
@@ -22,6 +29,7 @@ export type OpenTagDaemonConfig = {
   dispatcherUrl: string;
   repositories: RepositoryBindingConfig[];
   slackChannels?: SlackChannelBindingConfig[];
+  claudeCode?: ClaudeCodeExecutorConfig;
   githubToken?: string;
   pairingToken?: string;
   pollIntervalMs?: number;
@@ -66,6 +74,23 @@ export function loadConfigFromEnv(): OpenTagDaemonConfig {
               repo
             }
           ]
+        }
+      : {}),
+    ...(process.env.OPENTAG_CLAUDE_COMMAND ||
+    process.env.OPENTAG_CLAUDE_MODEL ||
+    process.env.OPENTAG_CLAUDE_PERMISSION_MODE ||
+    process.env.OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS
+      ? {
+          claudeCode: {
+            ...(process.env.OPENTAG_CLAUDE_COMMAND ? { command: process.env.OPENTAG_CLAUDE_COMMAND } : {}),
+            ...(process.env.OPENTAG_CLAUDE_MODEL ? { model: process.env.OPENTAG_CLAUDE_MODEL } : {}),
+            ...(process.env.OPENTAG_CLAUDE_PERMISSION_MODE
+              ? { permissionMode: process.env.OPENTAG_CLAUDE_PERMISSION_MODE as NonNullable<ClaudeCodeExecutorConfig["permissionMode"]> }
+              : {}),
+            ...(process.env.OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS
+              ? { dangerouslySkipPermissions: process.env.OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS === "true" }
+              : {})
+          }
         }
       : {}),
     ...(process.env.OPENTAG_GITHUB_TOKEN ? { githubToken: process.env.OPENTAG_GITHUB_TOKEN } : {}),
