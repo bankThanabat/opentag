@@ -9,18 +9,20 @@ describe("normalizeGitHubIssueComment", () => {
       commentUrl: "https://github.com/acme/demo/issues/1#issuecomment-123",
       apiCommentsUrl: "https://api.github.com/repos/acme/demo/issues/1/comments",
       issueUrl: "https://github.com/acme/demo/issues/1",
+      issueNumber: 1,
       owner: "acme",
       repo: "demo",
       actorId: 42,
       actorLogin: "octocat",
       private: false,
-      receivedAt: "2026-06-24T00:00:00.000Z"
+      receivedAt: "2026-06-24T00:00:00.000Z",
+      installationId: 99
     });
 
     expect(event?.source).toBe("github");
     expect(event?.command.intent).toBe("fix");
     expect(event?.permissions.map((permission) => permission.scope)).toContain("pr:create");
-    expect(event?.metadata).toMatchObject({ owner: "acme", repo: "demo" });
+    expect(event?.metadata).toMatchObject({ owner: "acme", repo: "demo", issueNumber: 1, installationId: 99 });
   });
 
   it("normalizes an @opentag pull request review comment", () => {
@@ -36,11 +38,13 @@ describe("normalizeGitHubIssueComment", () => {
       actorId: 42,
       actorLogin: "octocat",
       private: false,
-      receivedAt: "2026-06-24T00:00:00.000Z"
+      receivedAt: "2026-06-24T00:00:00.000Z",
+      installationId: 77
     });
 
     expect(event?.id).toBe("evt_github_pr_review_comment_456");
     expect(event?.context[0]?.kind).toBe("github.pull_request");
     expect(event?.callback.threadKey).toBe("acme/demo#2");
+    expect(event?.metadata).toMatchObject({ pullRequestNumber: 2, installationId: 77 });
   });
 });

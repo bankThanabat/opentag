@@ -7,12 +7,14 @@ export type GitHubIssueCommentInput = {
   commentUrl: string;
   apiCommentsUrl: string;
   issueUrl: string;
+  issueNumber: number;
   owner: string;
   repo: string;
   actorId: number;
   actorLogin: string;
   private: boolean;
   receivedAt: string;
+  installationId?: number;
 };
 
 export type GitHubPullRequestReviewCommentInput = {
@@ -28,6 +30,7 @@ export type GitHubPullRequestReviewCommentInput = {
   actorLogin: string;
   private: boolean;
   receivedAt: string;
+  installationId?: number;
 };
 
 function permissionsForIntent(intent: OpenTagCommand["intent"]): PermissionGrant[] {
@@ -103,7 +106,9 @@ export function normalizeGitHubIssueComment(input: GitHubIssueCommentInput): Ope
     },
     metadata: {
       owner: input.owner,
-      repo: input.repo
+      repo: input.repo,
+      issueNumber: input.issueNumber,
+      ...(typeof input.installationId === "number" ? { installationId: input.installationId } : {})
     }
   };
 }
@@ -152,7 +157,8 @@ export function normalizeGitHubPullRequestReviewComment(input: GitHubPullRequest
     metadata: {
       owner: input.owner,
       repo: input.repo,
-      pullRequestNumber: input.pullRequestNumber
+      pullRequestNumber: input.pullRequestNumber,
+      ...(typeof input.installationId === "number" ? { installationId: input.installationId } : {})
     }
   };
 }

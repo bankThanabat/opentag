@@ -15,7 +15,8 @@ describe("GitHub Probot handler", () => {
         },
         issue: {
           html_url: "https://github.com/acme/demo/issues/1",
-          comments_url: "https://api.github.com/repos/acme/demo/issues/1/comments"
+          comments_url: "https://api.github.com/repos/acme/demo/issues/1/comments",
+          number: 1
         },
         repository: {
           name: "demo",
@@ -49,7 +50,8 @@ describe("GitHub Probot handler", () => {
         },
         issue: {
           html_url: "https://github.com/acme/demo/issues/1",
-          comments_url: "https://api.github.com/repos/acme/demo/issues/1/comments"
+          comments_url: "https://api.github.com/repos/acme/demo/issues/1/comments",
+          number: 1
         },
         repository: {
           name: "demo",
@@ -83,7 +85,8 @@ describe("GitHub Probot handler", () => {
         },
         issue: {
           html_url: "https://github.com/acme/demo/issues/1",
-          comments_url: "https://api.github.com/repos/acme/demo/issues/1/comments"
+          comments_url: "https://api.github.com/repos/acme/demo/issues/1/comments",
+          number: 1
         },
         repository: {
           name: "demo",

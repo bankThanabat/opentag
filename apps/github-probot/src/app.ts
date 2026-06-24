@@ -3,9 +3,10 @@ import type { Probot } from "probot";
 
 type IssueCommentPayload = {
   comment: { id: number; body: string; html_url: string };
-  issue: { html_url: string; comments_url: string };
+  issue: { html_url: string; comments_url: string; number: number };
   repository: { name: string; private: boolean; owner: { login: string } };
   sender: { id: number; login: string };
+  installation?: { id: number };
 };
 
 type PullRequestReviewCommentPayload = {
@@ -13,6 +14,7 @@ type PullRequestReviewCommentPayload = {
   pull_request: { html_url: string; number: number };
   repository: { name: string; private: boolean; owner: { login: string } };
   sender: { id: number; login: string };
+  installation?: { id: number };
 };
 
 export async function handleIssueCommentCreated(input: {
@@ -28,12 +30,14 @@ export async function handleIssueCommentCreated(input: {
     commentUrl: input.payload.comment.html_url,
     apiCommentsUrl: input.payload.issue.comments_url,
     issueUrl: input.payload.issue.html_url,
+    issueNumber: input.payload.issue.number,
     owner: input.payload.repository.owner.login,
     repo: input.payload.repository.name,
     actorId: input.payload.sender.id,
     actorLogin: input.payload.sender.login,
     private: input.payload.repository.private,
-    receivedAt: input.now()
+    receivedAt: input.now(),
+    ...(input.payload.installation ? { installationId: input.payload.installation.id } : {})
   });
 
   if (!event) return;
@@ -65,7 +69,8 @@ export async function handlePullRequestReviewCommentCreated(input: {
     actorId: input.payload.sender.id,
     actorLogin: input.payload.sender.login,
     private: input.payload.repository.private,
-    receivedAt: input.now()
+    receivedAt: input.now(),
+    ...(input.payload.installation ? { installationId: input.payload.installation.id } : {})
   });
 
   if (!event) return;
