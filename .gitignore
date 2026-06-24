@@ -1,11 +1,14 @@
 node_modules/
 dist/
+.omx/
 .env
 .env.*
 !.env.example
 *.db
 *.db-shm
 *.db-wal
+*.private-key.pem
+*.real.json
 .DS_Store
 coverage/
 .worktrees/
