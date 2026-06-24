@@ -31,6 +31,15 @@ export function createDispatcherClient(input: { dispatcherUrl: string; runnerId:
       assertOk(response, "markRunning");
     },
 
+    async progress(runId, input) {
+      const response = await fetch(`${baseUrl}/v1/runs/${runId}/progress`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input)
+      });
+      assertOk(response, "progress");
+    },
+
     async complete(runId, result) {
       const response = await fetch(`${baseUrl}/v1/runs/${runId}/complete`, {
         method: "POST",

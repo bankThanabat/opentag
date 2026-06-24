@@ -4,6 +4,10 @@ export function renderAcknowledgement(runId: string): string {
   return `OpenTag picked this up. Run: \`${runId}\``;
 }
 
+export function renderProgress(input: { runId: string; message: string }): string {
+  return `OpenTag progress for \`${input.runId}\`: ${input.message}`;
+}
+
 export function renderFinalResult(result: OpenTagRunResult): string {
   const lines = [`OpenTag finished with **${result.conclusion}**.`, "", result.summary];
 

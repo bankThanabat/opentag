@@ -42,13 +42,22 @@ describe("opentagd", () => {
         async markRunning(runId, executor) {
           calls.push(`running:${runId}:${executor}`);
         },
+        async progress(runId, input) {
+          calls.push(`progress:${runId}:${input.type}:${input.message}`);
+        },
         async complete(runId, result) {
           calls.push(`complete:${runId}:${result.conclusion}:${result.summary}`);
         }
       }
     });
 
-    expect(calls).toEqual(["claim", "running:run_1:echo", "complete:run_1:success:Echoed OpenTag command: fix this"]);
+    expect(calls).toEqual([
+      "claim",
+      "running:run_1:echo",
+      "progress:run_1:executor.started:Echo executor started for run_1",
+      "progress:run_1:executor.completed:Echo executor completed for run_1",
+      "complete:run_1:success:Echoed OpenTag command: fix this"
+    ]);
   });
 
   it("returns false when no work is available", async () => {
@@ -61,6 +70,9 @@ describe("opentagd", () => {
           return null;
         },
         async markRunning() {
+          throw new Error("should not run");
+        },
+        async progress() {
           throw new Error("should not run");
         },
         async complete() {

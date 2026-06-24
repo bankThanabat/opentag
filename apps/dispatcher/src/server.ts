@@ -1,4 +1,5 @@
 import { OpenTagEventSchema, OpenTagRunResultSchema } from "@opentag/core";
+import { renderAcknowledgement, renderFinalResult, renderProgress } from "@opentag/github";
 import { createOpenTagRepository, migrateSchema } from "@opentag/store";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -19,11 +20,49 @@ const CompleteRunSchema = z.object({
   result: OpenTagRunResultSchema
 });
 
-export function createDispatcherApp(input: { databasePath: string }) {
+const ProgressSchema = z.object({
+  type: z.string().min(1).optional(),
+  message: z.string().min(1),
+  at: z.string().datetime().optional()
+});
+
+export type CallbackMessage = {
+  runId: string;
+  kind: "acknowledgement" | "progress" | "final";
+  provider: "github" | "slack" | "lark" | "webhook";
+  uri: string;
+  body: string;
+};
+
+export type CallbackSink = {
+  deliver(message: CallbackMessage): Promise<void>;
+};
+
+const noopCallbackSink: CallbackSink = {
+  async deliver() {
+    return;
+  }
+};
+
+async function deliverAndAudit(input: {
+  repo: ReturnType<typeof createOpenTagRepository>;
+  sink: CallbackSink;
+  message: CallbackMessage;
+}): Promise<void> {
+  await input.sink.deliver(input.message);
+  await input.repo.appendRunEvent({
+    runId: input.message.runId,
+    type: `callback.${input.message.kind}.delivered`,
+    payload: input.message
+  });
+}
+
+export function createDispatcherApp(input: { databasePath: string; callbackSink?: CallbackSink }) {
   const sqlite = new Database(input.databasePath);
   migrateSchema(sqlite);
   const repo = createOpenTagRepository(drizzle(sqlite));
   const app = new Hono();
+  const callbackSink = input.callbackSink ?? noopCallbackSink;
 
   app.get("/healthz", (c) => c.json({ ok: true }));
 
@@ -36,6 +75,17 @@ export function createDispatcherApp(input: { databasePath: string }) {
   app.post("/v1/runs", async (c) => {
     const parsed = CreateRunSchema.parse(await c.req.json());
     const run = await repo.createRun({ id: parsed.runId, event: parsed.event });
+    await deliverAndAudit({
+      repo,
+      sink: callbackSink,
+      message: {
+        runId: run.id,
+        kind: "acknowledgement",
+        provider: parsed.event.callback.provider,
+        uri: parsed.event.callback.uri,
+        body: renderAcknowledgement(run.id)
+      }
+    });
     return c.json({ run }, 201);
   });
 
@@ -51,9 +101,50 @@ export function createDispatcherApp(input: { databasePath: string }) {
     return c.json({ ok: true });
   });
 
+  app.post("/v1/runs/:runId/progress", async (c) => {
+    const runId = c.req.param("runId");
+    const body = ProgressSchema.parse(await c.req.json());
+    const stored = await repo.getRun({ runId });
+    if (!stored) return c.json({ error: "run_not_found" }, 404);
+
+    await repo.recordProgress({
+      runId,
+      message: body.message,
+      ...(body.type ? { type: body.type } : {}),
+      ...(body.at ? { at: body.at } : {})
+    });
+    await deliverAndAudit({
+      repo,
+      sink: callbackSink,
+      message: {
+        runId,
+        kind: "progress",
+        provider: stored.event.callback.provider,
+        uri: stored.event.callback.uri,
+        body: renderProgress({ runId, message: body.message })
+      }
+    });
+    return c.json({ ok: true });
+  });
+
   app.post("/v1/runs/:runId/complete", async (c) => {
+    const runId = c.req.param("runId");
     const parsed = CompleteRunSchema.parse(await c.req.json());
-    await repo.completeRun({ runId: c.req.param("runId"), result: parsed.result });
+    const stored = await repo.getRun({ runId });
+    if (!stored) return c.json({ error: "run_not_found" }, 404);
+
+    await repo.completeRun({ runId, result: parsed.result });
+    await deliverAndAudit({
+      repo,
+      sink: callbackSink,
+      message: {
+        runId,
+        kind: "final",
+        provider: stored.event.callback.provider,
+        uri: stored.event.callback.uri,
+        body: renderFinalResult(parsed.result)
+      }
+    });
     return c.json({ ok: true });
   });
 
@@ -61,6 +152,11 @@ export function createDispatcherApp(input: { databasePath: string }) {
     const stored = await repo.getRun({ runId: c.req.param("runId") });
     if (!stored) return c.json({ error: "run_not_found" }, 404);
     return c.json(stored);
+  });
+
+  app.get("/v1/runs/:runId/events", async (c) => {
+    const events = await repo.listRunEvents({ runId: c.req.param("runId") });
+    return c.json({ events });
   });
 
   return app;

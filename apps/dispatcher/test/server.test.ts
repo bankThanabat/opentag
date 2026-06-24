@@ -40,13 +40,26 @@ describe("dispatcher API", () => {
     expect(claimed.event.command.rawText).toBe("fix this");
   });
 
-  it("stores completion results", async () => {
-    const app = createDispatcherApp({ databasePath: ":memory:" });
+  it("delivers acknowledgement, progress, and final callback messages with audit events", async () => {
+    const delivered: { kind: string; body: string }[] = [];
+    const app = createDispatcherApp({
+      databasePath: ":memory:",
+      callbackSink: {
+        async deliver(message) {
+          delivered.push({ kind: message.kind, body: message.body });
+        }
+      }
+    });
 
     await app.request("/v1/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ runId: "run_2", event: { ...validEvent, id: "evt_2", sourceEventId: "comment_2" } })
+    });
+    await app.request("/v1/runs/run_2/progress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "executor.progress", message: "running tests", at: "2026-06-24T00:00:01.000Z" })
     });
     const completeResponse = await app.request("/v1/runs/run_2/complete", {
       method: "POST",
@@ -59,5 +72,21 @@ describe("dispatcher API", () => {
     const stored = await getResponse.json();
     expect(stored.run.status).toBe("succeeded");
     expect(stored.run.result.summary).toBe("done");
+    expect(delivered).toEqual([
+      { kind: "acknowledgement", body: "OpenTag picked this up. Run: `run_2`" },
+      { kind: "progress", body: "OpenTag progress for `run_2`: running tests" },
+      { kind: "final", body: "OpenTag finished with **success**.\n\ndone" }
+    ]);
+
+    const eventsResponse = await app.request("/v1/runs/run_2/events");
+    const { events } = await eventsResponse.json();
+    expect(events.map((event: { type: string }) => event.type)).toEqual([
+      "run.created",
+      "callback.acknowledgement.delivered",
+      "run.progress",
+      "callback.progress.delivered",
+      "run.completed",
+      "callback.final.delivered"
+    ]);
   });
 });

@@ -1,11 +1,19 @@
 import { OpenTagEventSchema, OpenTagRunResultSchema, type OpenTagEvent, type OpenTagRun, type OpenTagRunResult } from "@opentag/core";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { repoBindings, runEvents, runners, runs } from "./schema.js";
 
 export type ClaimedOpenTagRun = {
   run: OpenTagRun;
   event: OpenTagEvent;
+};
+
+export type OpenTagAuditEvent = {
+  id: number;
+  runId: string;
+  type: string;
+  payload: unknown;
+  createdAt: string;
 };
 
 function nowIso(): string {
@@ -27,7 +35,18 @@ function runFromRow(row: typeof runs.$inferSelect): OpenTagRun {
 }
 
 export function createOpenTagRepository(db: BetterSQLite3Database) {
+  async function appendRunEvent(input: { runId: string; type: string; payload: unknown; createdAt?: string }): Promise<void> {
+    await db.insert(runEvents).values({
+      runId: input.runId,
+      type: input.type,
+      payloadJson: JSON.stringify(input.payload),
+      createdAt: input.createdAt ?? nowIso()
+    });
+  }
+
   return {
+    appendRunEvent,
+
     async registerRunner(input: { runnerId: string; name: string }): Promise<void> {
       const createdAt = nowIso();
       await db.insert(runners).values({ runnerId: input.runnerId, name: input.name, createdAt }).onConflictDoNothing();
@@ -63,10 +82,10 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         createdAt,
         updatedAt: createdAt
       });
-      await db.insert(runEvents).values({
+      await appendRunEvent({
         runId: input.id,
         type: "run.created",
-        payloadJson: JSON.stringify({ eventId: event.id }),
+        payload: { eventId: event.id },
         createdAt
       });
       return {
@@ -93,10 +112,10 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
           updatedAt
         })
         .where(eq(runs.id, row.id));
-      await db.insert(runEvents).values({
+      await appendRunEvent({
         runId: row.id,
         type: "run.claimed",
-        payloadJson: JSON.stringify({ runnerId: input.runnerId, leaseExpiresAt }),
+        payload: { runnerId: input.runnerId, leaseExpiresAt },
         createdAt: updatedAt
       });
 
@@ -117,10 +136,10 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
     async markRunning(input: { runId: string; executor: string }): Promise<void> {
       const updatedAt = nowIso();
       await db.update(runs).set({ status: "running", executor: input.executor, updatedAt }).where(eq(runs.id, input.runId));
-      await db.insert(runEvents).values({
+      await appendRunEvent({
         runId: input.runId,
         type: "run.running",
-        payloadJson: JSON.stringify({ executor: input.executor }),
+        payload: { executor: input.executor },
         createdAt: updatedAt
       });
     },
@@ -130,11 +149,23 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       const updatedAt = nowIso();
       const status = result.conclusion === "success" ? "succeeded" : result.conclusion === "cancelled" ? "cancelled" : "failed";
       await db.update(runs).set({ status, resultJson: JSON.stringify(result), updatedAt }).where(eq(runs.id, input.runId));
-      await db.insert(runEvents).values({
+      await appendRunEvent({
         runId: input.runId,
         type: "run.completed",
-        payloadJson: JSON.stringify(result),
+        payload: result,
         createdAt: updatedAt
+      });
+    },
+
+    async recordProgress(input: { runId: string; message: string; type?: string; at?: string }): Promise<void> {
+      await appendRunEvent({
+        runId: input.runId,
+        type: "run.progress",
+        payload: {
+          type: input.type ?? "progress",
+          message: input.message,
+          at: input.at ?? nowIso()
+        }
       });
     },
 
@@ -145,6 +176,17 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         run: runFromRow(row),
         event: OpenTagEventSchema.parse(JSON.parse(row.eventJson))
       };
+    },
+
+    async listRunEvents(input: { runId: string }): Promise<OpenTagAuditEvent[]> {
+      const rows = await db.select().from(runEvents).where(eq(runEvents.runId, input.runId)).orderBy(asc(runEvents.id));
+      return rows.map((row) => ({
+        id: row.id,
+        runId: row.runId,
+        type: row.type,
+        payload: JSON.parse(row.payloadJson) as unknown,
+        createdAt: row.createdAt
+      }));
     }
   };
 }

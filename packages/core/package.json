@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsc -b tsconfig.json --emitDeclarationOnly --force",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

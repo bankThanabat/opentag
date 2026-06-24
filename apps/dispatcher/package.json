@@ -12,6 +12,7 @@
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@opentag/core": "workspace:*",
+    "@opentag/github": "workspace:*",
     "@opentag/store": "workspace:*",
     "better-sqlite3": "^11.7.0",
     "drizzle-orm": "^0.38.3",

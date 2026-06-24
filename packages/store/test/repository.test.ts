@@ -79,5 +79,8 @@ describe("OpenTag repository", () => {
     const stored = await repo.getRun({ runId: "run_2" });
     expect(stored?.run.status).toBe("succeeded");
     expect(stored?.run.result?.summary).toBe("done");
+
+    const events = await repo.listRunEvents({ runId: "run_2" });
+    expect(events.map((event) => event.type)).toEqual(["run.created", "run.completed"]);
   });
 });

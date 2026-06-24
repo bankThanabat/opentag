@@ -29,6 +29,9 @@ importers:
       '@opentag/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@opentag/github':
+        specifier: workspace:*
+        version: link:../../packages/github
       '@opentag/store':
         specifier: workspace:*
         version: link:../../packages/store

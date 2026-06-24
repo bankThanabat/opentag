@@ -9,6 +9,7 @@ export type ClaimedRun = {
 export type DaemonClient = {
   claim(): Promise<ClaimedRun | null>;
   markRunning(runId: string, executor: string): Promise<void>;
+  progress(runId: string, input: { type: string; message: string; at: string }): Promise<void>;
   complete(runId: string, result: OpenTagRunResult): Promise<void>;
 };
 
@@ -46,6 +47,11 @@ export async function runOneDaemonIteration(input: {
     {
       emit: async (event) => {
         console.log(`[${event.type}] ${event.message}`);
+        await input.client.progress(claimed.run.id, {
+          type: event.type,
+          message: event.message,
+          at: event.at
+        });
       }
     }
   );
