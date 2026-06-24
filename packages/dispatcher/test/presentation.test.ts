@@ -61,6 +61,22 @@ describe("default callback presentation", () => {
 
     expect(presentation.final({ provider: "github", result }).body).toContain("Next action: Approve intent_label_1");
     expect(presentation.final({ provider: "slack", result }).body).toContain("*Next action*: Approve intent_label_1");
+    expect(presentation.final({ provider: "slack", result }).blocks).toEqual([
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "*Finished with needs_human.*\nPrepared a suggested change snapshot."
+        }
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "*Next action*: Approve intent_label_1 to add the bug label."
+        }
+      }
+    ]);
     expect(presentation.final({ provider: "github", result }).body).not.toContain("[object Object]");
   });
 });

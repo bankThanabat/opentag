@@ -15,6 +15,7 @@ export type ExecutorRunInput = {
   workspacePath: string;
   command: OpenTagCommand;
   context: ContextPointer[];
+  baseBranch?: string;
 };
 
 export type ExecutorReadiness = {

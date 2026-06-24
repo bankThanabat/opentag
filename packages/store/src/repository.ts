@@ -754,6 +754,9 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
               ? "needs_approval"
               : "failed";
       const runRow = await db.select().from(runs).where(eq(runs.id, input.runId)).limit(1).get();
+      if (!runRow) {
+        throw new Error(`Run not found: ${input.runId}`);
+      }
       const runThread = runRow ? protocolRunFieldsFromEvent(OpenTagEventSchema.parse(JSON.parse(runRow.eventJson)), runRow.createdAt).thread : undefined;
       await db.update(runs).set({ status, resultJson: JSON.stringify(result), updatedAt }).where(eq(runs.id, input.runId));
       for (const snapshot of result.suggestedChanges ?? []) {
@@ -1008,7 +1011,8 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         return preflightMutationIntent({
           intent,
           permissions: event.permissions,
-          policyRules
+          policyRules,
+          ...(input.adapter ? { adapter: input.adapter } : {})
         }).outcome;
       });
 
@@ -1120,7 +1124,8 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         },
         visibility: input.visibility ?? "audit",
         importance: input.importance ?? "normal",
-        message: input.message
+        message: input.message,
+        createdAt: input.at ?? nowIso()
       });
     },
 

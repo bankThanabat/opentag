@@ -37,6 +37,16 @@ export type OpenTagDaemonConfig = {
   heartbeatIntervalMs?: number;
 };
 
+const CLAUDE_PERMISSION_MODES = new Set(["acceptEdits", "auto", "bypassPermissions", "default", "plan"]);
+
+function claudePermissionModeFromEnv(value: string | undefined): ClaudeCodeExecutorConfig["permissionMode"] | undefined {
+  if (!value) return undefined;
+  if (!CLAUDE_PERMISSION_MODES.has(value)) {
+    throw new Error(`Invalid OPENTAG_CLAUDE_PERMISSION_MODE: ${value}`);
+  }
+  return value as NonNullable<ClaudeCodeExecutorConfig["permissionMode"]>;
+}
+
 export function loadConfigFromEnv(): OpenTagDaemonConfig {
   const configPath = process.env.OPENTAG_CONFIG_PATH;
   if (configPath) {
@@ -46,6 +56,7 @@ export function loadConfigFromEnv(): OpenTagDaemonConfig {
   const owner = process.env.OPENTAG_REPO_OWNER;
   const repo = process.env.OPENTAG_REPO_NAME;
   const checkoutPath = process.env.OPENTAG_WORKSPACE_PATH;
+  const claudePermissionMode = claudePermissionModeFromEnv(process.env.OPENTAG_CLAUDE_PERMISSION_MODE);
   const repositories =
     owner && repo && checkoutPath
       ? [
@@ -85,9 +96,7 @@ export function loadConfigFromEnv(): OpenTagDaemonConfig {
           claudeCode: {
             ...(process.env.OPENTAG_CLAUDE_COMMAND ? { command: process.env.OPENTAG_CLAUDE_COMMAND } : {}),
             ...(process.env.OPENTAG_CLAUDE_MODEL ? { model: process.env.OPENTAG_CLAUDE_MODEL } : {}),
-            ...(process.env.OPENTAG_CLAUDE_PERMISSION_MODE
-              ? { permissionMode: process.env.OPENTAG_CLAUDE_PERMISSION_MODE as NonNullable<ClaudeCodeExecutorConfig["permissionMode"]> }
-              : {}),
+            ...(claudePermissionMode ? { permissionMode: claudePermissionMode } : {}),
             ...(process.env.OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS
               ? { dangerouslySkipPermissions: process.env.OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS === "true" }
               : {})

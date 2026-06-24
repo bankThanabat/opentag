@@ -224,6 +224,54 @@ describe("OpenTag repository", () => {
     expect(events[2]).toMatchObject({ visibility: "audit", importance: "high", message: "done" });
   });
 
+  it("does not write completion artifacts for missing runs", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await expect(
+      repo.completeRun({
+        runId: "missing_run",
+        result: {
+          conclusion: "needs_human",
+          summary: "Proposal ready.",
+          suggestedChanges: [
+            {
+              proposalId: "proposal_missing_run",
+              createdAt: "2026-06-24T00:00:01.000Z",
+              summary: "Add label.",
+              intents: [{ intentId: "intent_label", domain: "labels", action: "add_label", summary: "Add label.", params: { label: "bug" } }]
+            }
+          ]
+        }
+      })
+    ).rejects.toThrow("Run not found: missing_run");
+    await expect(repo.listRunEvents({ runId: "missing_run" })).resolves.toEqual([]);
+    await expect(repo.getSuggestedChanges({ proposalId: "proposal_missing_run" })).resolves.toBeNull();
+  });
+
+  it("uses supplied progress timestamps as audit event timestamps", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.recordProgress({
+      runId: "run_progress_time",
+      message: "delayed progress",
+      type: "executor.progress",
+      at: "2026-06-24T00:00:01.000Z"
+    });
+
+    await expect(repo.listRunEvents({ runId: "run_progress_time" })).resolves.toEqual([
+      expect.objectContaining({
+        createdAt: "2026-06-24T00:00:01.000Z",
+        payload: expect.objectContaining({ at: "2026-06-24T00:00:01.000Z" })
+      })
+    ]);
+  });
+
   it("stores needs_human results as needs_approval", async () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);

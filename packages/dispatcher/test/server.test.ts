@@ -462,6 +462,21 @@ describe("dispatcher API", () => {
     });
   });
 
+  it("rejects approval decisions with overlapping approved and rejected intents", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+    const response = await app.request("/v1/proposals/proposal_overlap/approvals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        approvedIntentIds: ["intent_1"],
+        rejectedIntentIds: ["intent_1"],
+        approvedBy: { provider: "github", providerUserId: "42" }
+      })
+    });
+
+    expect(response.status).toBe(400);
+  });
+
   it("creates child runs from next action hints with lineage fields", async () => {
     const app = createDispatcherApp({ databasePath: ":memory:" });
     await app.request("/v1/repo-bindings", {

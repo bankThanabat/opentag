@@ -394,10 +394,15 @@ export function capabilityForMutationIntent(
 
 export function resolvePolicy(input: {
   capabilityId: string;
+  mutationDomain?: string;
   rules: PolicyRule[];
   defaultDecision?: "allow" | "deny";
 }): PolicyResolution {
-  const matchingRules = input.rules.filter((rule) => !rule.capabilityId || rule.capabilityId === input.capabilityId);
+  const matchingRules = input.rules.filter(
+    (rule) =>
+      (!rule.capabilityId || rule.capabilityId === input.capabilityId) &&
+      (!rule.mutationDomain || rule.mutationDomain === input.mutationDomain)
+  );
   const sortedRules = [...matchingRules].sort((left, right) => {
     const scopeDelta = POLICY_SCOPE_ORDER.indexOf(right.scope) - POLICY_SCOPE_ORDER.indexOf(left.scope);
     if (scopeDelta !== 0) return scopeDelta;
@@ -433,6 +438,8 @@ export function preflightMutationIntent(input: {
   intent: MutationIntent;
   permissions: PermissionGrant[];
   policyRules: PolicyRule[];
+  adapter?: string;
+  executorConditions?: string[];
   capabilities?: readonly CapabilityContract[];
 }): { capability?: CapabilityContract; policyResolution?: PolicyResolution; outcome: ApplyIntentOutcome } {
   const capability = capabilityForMutationIntent(input.intent, input.capabilities);
@@ -456,9 +463,33 @@ export function preflightMutationIntent(input: {
       }
     };
   }
+  if (input.adapter && !capability.adapterTargets.includes(input.adapter)) {
+    return {
+      capability,
+      outcome: {
+        intentId: input.intent.intentId,
+        outcome: "unsupported",
+        message: `Capability ${capability.id} cannot be applied by adapter ${input.adapter}.`
+      }
+    };
+  }
+  const missingConditions = (capability.requiredExecutorConditions ?? []).filter(
+    (condition) => !(input.executorConditions ?? []).includes(condition)
+  );
+  if (missingConditions.length > 0) {
+    return {
+      capability,
+      outcome: {
+        intentId: input.intent.intentId,
+        outcome: "unsupported",
+        message: `Missing executor condition(s) for capability ${capability.id}: ${missingConditions.join(", ")}.`
+      }
+    };
+  }
 
   const policyResolution = resolvePolicy({
     capabilityId: capability.id,
+    mutationDomain: input.intent.domain,
     rules: input.policyRules,
     defaultDecision: capability.capabilityClass === "external_write" ? "deny" : "allow"
   });

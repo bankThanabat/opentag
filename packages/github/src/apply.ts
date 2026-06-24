@@ -365,9 +365,12 @@ export async function applyGitHubIssueMutationOperation(input: {
 export async function applyGitHubIssueMutationIntent(input: {
   target: GitHubIssueMutationTarget;
   intent: MutationIntent;
+  mappings?: AdapterMutationMapping[];
   fetchImpl?: FetchLike;
 }): Promise<ApplyIntentOutcome> {
-  const compiled = compileGitHubIssueMutationIntent(input.intent);
+  const compiled = compileGitHubIssueMutationIntent(input.intent, {
+    ...(input.mappings ? { mappings: input.mappings } : {})
+  });
   if (!compiled.ok) return compiled.outcome;
   return applyGitHubIssueMutationOperation({
     target: input.target,
@@ -379,11 +382,19 @@ export async function applyGitHubIssueMutationIntent(input: {
 export async function applyGitHubIssueMutationIntents(input: {
   target: GitHubIssueMutationTarget;
   intents: MutationIntent[];
+  mappings?: AdapterMutationMapping[];
   fetchImpl?: FetchLike;
 }): Promise<ApplyIntentOutcome[]> {
   const outcomes: ApplyIntentOutcome[] = [];
   for (const intent of input.intents) {
-    outcomes.push(await applyGitHubIssueMutationIntent({ target: input.target, intent, ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}) }));
+    outcomes.push(
+      await applyGitHubIssueMutationIntent({
+        target: input.target,
+        intent,
+        ...(input.mappings ? { mappings: input.mappings } : {}),
+        ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
+      })
+    );
   }
   return outcomes;
 }

@@ -34,6 +34,7 @@ function slackBotTokenFor(input: {
 export function createGitHubCallbackSink(input: { token?: string; fetchImpl?: FetchLike }): CallbackSink {
   const fetchImpl = input.fetchImpl ?? fetch;
   const commentUriByKey = new Map<string, string>();
+  const deliveryByKey = new Map<string, Promise<void>>();
 
   return {
     async deliver(message: CallbackMessage): Promise<void> {
@@ -41,31 +42,40 @@ export function createGitHubCallbackSink(input: { token?: string; fetchImpl?: Fe
       if (!input.token) return;
 
       const statusKey = message.statusMessageKey ?? `${message.runId}:status`;
-      const existingCommentUri = commentUriByKey.get(statusKey);
-      const response = await fetchImpl(existingCommentUri ?? message.uri, {
-        method: existingCommentUri ? "PATCH" : "POST",
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${input.token}`,
-          "content-type": "application/json",
-          "x-github-api-version": "2022-11-28"
-        },
-        body: JSON.stringify({ body: message.body })
-      });
+      const previous = deliveryByKey.get(statusKey) ?? Promise.resolve();
+      const current = previous.then(async () => {
+        const existingCommentUri = commentUriByKey.get(statusKey);
+        const response = await fetchImpl(existingCommentUri ?? message.uri, {
+          method: existingCommentUri ? "PATCH" : "POST",
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${input.token}`,
+            "content-type": "application/json",
+            "x-github-api-version": "2022-11-28"
+          },
+          body: JSON.stringify({ body: message.body })
+        });
 
-      if (!response.ok) {
-        throw new Error(`deliver GitHub callback failed: ${response.status} ${await response.text()}`);
-      }
-      if (!existingCommentUri) {
-        const body = (await response.json()) as { id?: number; url?: string };
-        const commentUri = githubCommentUriFrom({ commentsUri: message.uri, responseBody: body });
-        if (commentUri) {
-          commentUriByKey.set(statusKey, commentUri);
+        if (!response.ok) {
+          throw new Error(`deliver GitHub callback failed: ${response.status} ${await response.text()}`);
         }
-      }
-      if (message.kind === "final") {
-        commentUriByKey.delete(statusKey);
-      }
+        if (!existingCommentUri) {
+          const body = (await response.json()) as { id?: number; url?: string };
+          const commentUri = githubCommentUriFrom({ commentsUri: message.uri, responseBody: body });
+          if (commentUri) {
+            commentUriByKey.set(statusKey, commentUri);
+          }
+        }
+        if (message.kind === "final") {
+          commentUriByKey.delete(statusKey);
+        }
+      });
+      deliveryByKey.set(statusKey, current);
+      await current.finally(() => {
+        if (deliveryByKey.get(statusKey) === current) {
+          deliveryByKey.delete(statusKey);
+        }
+      });
     }
   };
 }

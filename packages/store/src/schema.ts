@@ -33,16 +33,22 @@ export const runs = sqliteTable(
   })
 );
 
-export const runEvents = sqliteTable("run_events", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  runId: text("run_id").notNull(),
-  type: text("type").notNull(),
-  visibility: text("visibility").notNull().default("audit"),
-  importance: text("importance").notNull().default("normal"),
-  message: text("message"),
-  payloadJson: text("payload_json").notNull(),
-  createdAt: text("created_at").notNull()
-});
+export const runEvents = sqliteTable(
+  "run_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: text("run_id").notNull(),
+    type: text("type").notNull(),
+    visibility: text("visibility").notNull().default("audit"),
+    importance: text("importance").notNull().default("normal"),
+    message: text("message"),
+    payloadJson: text("payload_json").notNull(),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => ({
+    runIdx: index("run_events_run_idx").on(table.runId)
+  })
+);
 
 export const suggestedChanges = sqliteTable("suggested_changes", {
   proposalId: text("proposal_id").primaryKey(),
@@ -174,6 +180,7 @@ export function migrateSchema(sqlite: Database.Database): void {
       payload_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS run_events_run_idx ON run_events(run_id);
     CREATE TABLE IF NOT EXISTS suggested_changes (
       proposal_id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL,
@@ -221,6 +228,8 @@ export function migrateSchema(sqlite: Database.Database): void {
       created_at TEXT NOT NULL,
       PRIMARY KEY (provider, owner, repo, id)
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS repo_policy_rules_repo_id_idx
+      ON repo_policy_rules(provider, owner, repo, id);
     CREATE TABLE IF NOT EXISTS repo_mutation_mappings (
       id TEXT NOT NULL,
       provider TEXT NOT NULL,
@@ -230,6 +239,8 @@ export function migrateSchema(sqlite: Database.Database): void {
       created_at TEXT NOT NULL,
       PRIMARY KEY (provider, owner, repo, id)
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS repo_mutation_mappings_repo_id_idx
+      ON repo_mutation_mappings(provider, owner, repo, id);
     CREATE TABLE IF NOT EXISTS slack_channel_bindings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       team_id TEXT NOT NULL,
@@ -297,4 +308,7 @@ export function migrateSchema(sqlite: Database.Database): void {
   if (!runEventColumnNames.has("message")) {
     sqlite.exec("ALTER TABLE run_events ADD COLUMN message TEXT");
   }
+  sqlite.exec("CREATE INDEX IF NOT EXISTS run_events_run_idx ON run_events(run_id)");
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS repo_policy_rules_repo_id_idx ON repo_policy_rules(provider, owner, repo, id)");
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS repo_mutation_mappings_repo_id_idx ON repo_mutation_mappings(provider, owner, repo, id)");
 }

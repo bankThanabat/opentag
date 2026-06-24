@@ -70,6 +70,11 @@ const ApprovalDecisionInputSchema = z.object({
   approvedBy: ActorIdentitySchema,
   approvedAt: z.string().datetime().optional(),
   scope: z.enum(["manual", "policy"]).default("manual")
+}).refine((value) => {
+  const rejected = new Set(value.rejectedIntentIds ?? []);
+  return value.approvedIntentIds.every((intentId) => !rejected.has(intentId));
+}, {
+  message: "approvedIntentIds and rejectedIntentIds must not overlap"
 });
 
 const ApplyPlanInputSchema = z.object({
@@ -445,7 +450,9 @@ export function createDispatcherApp(input: {
 
   app.post("/v1/proposals/:proposalId/approvals", async (c) => {
     const proposalId = c.req.param("proposalId");
-    const body = ApprovalDecisionInputSchema.parse(await c.req.json());
+    const parsedBody = ApprovalDecisionInputSchema.safeParse(await c.req.json());
+    if (!parsedBody.success) return c.json({ error: "invalid_approval_decision" }, 400);
+    const body = parsedBody.data;
     const decision = await repo.recordApprovalDecision({
       id: body.id ?? `approval_${proposalId}_${Date.now()}`,
       proposalId,
@@ -501,7 +508,7 @@ export function createDispatcherApp(input: {
       id: body.id ?? `apply_${proposalId}_${Date.now()}`,
       proposalId,
       approvalDecisionId: body.approvalDecisionId,
-      ...(body.selectedIntentIds?.length ? { selectedIntentIds: body.selectedIntentIds } : {}),
+      ...(body.selectedIntentIds !== undefined ? { selectedIntentIds: body.selectedIntentIds } : {}),
       ...(body.adapter ? { adapter: body.adapter } : {})
     });
     if (!plan) return c.json({ error: "proposal_or_approval_not_found" }, 404);

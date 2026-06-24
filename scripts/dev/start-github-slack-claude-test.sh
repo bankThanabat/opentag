@@ -32,8 +32,18 @@ echo "Starting dispatcher on :$OPENTAG_DISPATCHER_PORT"
   apps/dispatcher/node_modules/.bin/tsx apps/dispatcher/src/index.ts
 ) &
 DISPATCHER_PID=$!
+DAEMON_PID=""
+PROBOT_PID=""
+SLACK_PID=""
 
-trap 'kill $DISPATCHER_PID $DAEMON_PID $PROBOT_PID $SLACK_PID 2>/dev/null || true' EXIT
+cleanup() {
+  for pid in "$DISPATCHER_PID" "$DAEMON_PID" "$PROBOT_PID" "$SLACK_PID"; do
+    if [[ -n "$pid" ]]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+}
+trap cleanup EXIT
 
 sleep 2
 

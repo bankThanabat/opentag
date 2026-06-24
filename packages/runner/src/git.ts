@@ -39,8 +39,9 @@ export async function createRunBranch(input: {
   runner: CommandRunner;
   workspacePath: string;
   branchName: string;
+  startPoint?: string;
 }): Promise<void> {
-  const result = await input.runner.run("git", ["checkout", "-B", input.branchName], { cwd: input.workspacePath });
+  const result = await input.runner.run("git", ["checkout", "-B", input.branchName, ...(input.startPoint ? [input.startPoint] : [])], { cwd: input.workspacePath });
   await assertCommandSucceeded(result, "create run branch");
 }
 

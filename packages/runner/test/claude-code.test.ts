@@ -56,7 +56,8 @@ describe("Claude Code executor", () => {
         runId: "run_1",
         workspacePath: "/tmp/demo",
         command: { rawText: "fix this", intent: "fix", args: {} },
-        context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }]
+        context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }],
+        baseBranch: "main"
       },
       {
         emit: async (event) => {
@@ -66,7 +67,7 @@ describe("Claude Code executor", () => {
     );
 
     const claudePrintCall = calls.find((call) => call.command === "claude" && call.args.includes("--print"));
-    expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "checkout -B opentag/run_1")).toBe(true);
+    expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "checkout -B opentag/run_1 main")).toBe(true);
     expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "clean -fd -- .claude")).toBe(true);
     expect(claudePrintCall?.args).toContain("--input-format");
     expect(claudePrintCall?.args).toContain("text");

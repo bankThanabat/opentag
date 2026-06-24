@@ -16,17 +16,12 @@ if [[ -f "$OPENTAG_ENV_FILE" ]]; then
   set +a
 fi
 
-: "${SLACK_SIGNING_SECRET:?Set SLACK_SIGNING_SECRET or OPENTAG_ENV_FILE}"
 : "${OPENTAG_SLACK_BOT_TOKEN:?Set OPENTAG_SLACK_BOT_TOKEN or OPENTAG_ENV_FILE}"
 : "${OPENTAG_CONFIG_PATH:?Set OPENTAG_CONFIG_PATH or OPENTAG_ENV_FILE}"
+: "${OPENTAG_CLAUDE_COMMAND:=claude}"
 
-if ! command -v gh >/dev/null 2>&1; then
-  echo "gh CLI not found. Install and authenticate GitHub CLI first." >&2
-  exit 1
-fi
-
-if ! command -v claude >/dev/null 2>&1; then
-  echo "Claude Code CLI not found. Install/login to Claude Code first." >&2
+if ! command -v "$OPENTAG_CLAUDE_COMMAND" >/dev/null 2>&1; then
+  echo "Claude Code CLI not found at '$OPENTAG_CLAUDE_COMMAND'. Install/login to Claude Code first." >&2
   exit 1
 fi
 
@@ -59,6 +54,10 @@ CONFIG_PATH="$(mktemp /tmp/opentag-slack-claude-config.XXXXXX)"
 DATABASE_PATH="${OPENTAG_DATABASE_PATH:-$TMP_ROOT/opentag-slack-claude.db}"
 
 if [[ ! -d "$CHECKOUT_PATH/.git" ]]; then
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "gh CLI not found. Set OPENTAG_WORKSPACE_PATH to an existing checkout, or install/authenticate GitHub CLI for cloning." >&2
+    exit 1
+  fi
   gh repo clone "$OWNER/$REPO" "$CHECKOUT_PATH" >/dev/null
 fi
 
@@ -70,7 +69,7 @@ cat > "$CONFIG_PATH" <<JSON
   "pollIntervalMs": 1000,
   "heartbeatIntervalMs": 15000,
   "claudeCode": {
-    "command": "${OPENTAG_CLAUDE_COMMAND:-claude}",
+    "command": "${OPENTAG_CLAUDE_COMMAND}",
     "permissionMode": "${OPENTAG_CLAUDE_PERMISSION_MODE}"
   },
   "repositories": [

@@ -107,6 +107,59 @@ describe("createGitHubCallbackSink", () => {
     ]);
   });
 
+  it("serializes concurrent GitHub callback deliveries for the same run", async () => {
+    const requests: { url: string; method: string; body: unknown }[] = [];
+    let resolveFirst: (() => void) | undefined;
+    const firstRequest = new Promise<void>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const sink = createGitHubCallbackSink({
+      token: "ghs_test",
+      fetchImpl: (async (url, init) => {
+        requests.push({
+          url: String(url),
+          method: init?.method ?? "GET",
+          body: JSON.parse(String(init?.body))
+        });
+        if (requests.length === 1) {
+          await firstRequest;
+          return Response.json({ id: 123, url: "https://api.github.com/repos/acme/demo/issues/comments/123" });
+        }
+        return Response.json({ id: 123, url: "https://api.github.com/repos/acme/demo/issues/comments/123" });
+      }) as typeof fetch
+    });
+
+    const first = sink.deliver({
+      runId: "run_1",
+      kind: "acknowledgement",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "Starting"
+    });
+    const second = sink.deliver({
+      runId: "run_1",
+      kind: "progress",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "Still working"
+    });
+    resolveFirst?.();
+    await Promise.all([first, second]);
+
+    expect(requests).toEqual([
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/1/comments",
+        method: "POST",
+        body: { body: "Starting" }
+      },
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/comments/123",
+        method: "PATCH",
+        body: { body: "Still working" }
+      }
+    ]);
+  });
+
   it("ignores non-GitHub callback messages", async () => {
     const sink = createGitHubCallbackSink({
       token: "ghs_test",

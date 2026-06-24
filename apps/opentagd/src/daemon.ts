@@ -67,7 +67,8 @@ export async function runOneDaemonIteration(input: {
     runId: claimed.run.id,
     workspacePath: binding.checkoutPath,
     command: claimed.event.command,
-    context: claimed.event.context
+    context: claimed.event.context,
+    ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {})
   });
   if (!readiness.ready) {
     await input.client.complete(claimed.run.id, {
@@ -95,7 +96,8 @@ export async function runOneDaemonIteration(input: {
         runId: claimed.run.id,
         workspacePath: binding.checkoutPath,
         command: claimed.event.command,
-        context: claimed.event.context
+        context: claimed.event.context,
+        ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {})
       },
       {
         emit: async (event) => {

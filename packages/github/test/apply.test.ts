@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyGitHubIssueMutationIntent, applyGitHubIssueMutationOperation, compileGitHubIssueMutationIntent } from "../src/apply.js";
+import { applyGitHubIssueMutationIntent, compileGitHubIssueMutationIntent } from "../src/apply.js";
 
 describe("GitHub apply helpers", () => {
   it("compiles semantic mutation intents into GitHub issue operations", () => {
@@ -125,6 +125,7 @@ describe("GitHub apply helpers", () => {
       applyGitHubIssueMutationIntent({
         target: { token: "ghs_test", owner: "acme", repo: "demo", issueNumber: 7 },
         fetchImpl,
+        mappings: [{ id: "priority", adapter: "github", domain: "priority", strategy: "label", values: { P0: "priority/P0", P1: "priority/P1" } }],
         intent: {
           intentId: "intent_priority",
           domain: "priority",
@@ -132,28 +133,6 @@ describe("GitHub apply helpers", () => {
           summary: "Set P1.",
           params: { priority: "P1" }
         }
-      })
-    ).resolves.toMatchObject({ intentId: "intent_priority", outcome: "unsupported" });
-
-    requests.length = 0;
-    const compiled = compileGitHubIssueMutationIntent(
-      {
-        intentId: "intent_priority",
-        domain: "priority",
-        action: "set_priority",
-        summary: "Set P1.",
-        params: { priority: "P1" }
-      },
-      {
-        mappings: [{ id: "priority", adapter: "github", domain: "priority", strategy: "label", values: { P0: "priority/P0", P1: "priority/P1" } }]
-      }
-    );
-    if (!compiled.ok) throw new Error("expected compilation success");
-    await expect(
-      applyGitHubIssueMutationOperation({
-        target: { token: "ghs_test", owner: "acme", repo: "demo", issueNumber: 7 },
-        fetchImpl,
-        operation: compiled.operation
       })
     ).resolves.toMatchObject({ intentId: "intent_priority", outcome: "applied" });
 

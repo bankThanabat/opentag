@@ -53,7 +53,8 @@ describe("Codex executor", () => {
         runId: "run_1",
         workspacePath: "/tmp/demo",
         command: { rawText: "fix this", intent: "fix", args: {} },
-        context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }]
+        context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }],
+        baseBranch: "main"
       },
       {
         emit: async (event) => {
@@ -62,7 +63,7 @@ describe("Codex executor", () => {
       }
     );
 
-    expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "checkout -B opentag/run_1")).toBe(true);
+    expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "checkout -B opentag/run_1 main")).toBe(true);
     expect(calls.some((call) => call.command === "codex" && call.args[0] === "exec")).toBe(true);
     expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "clean -fd -- .omx")).toBe(true);
     expect(calls.find((call) => call.command === "codex" && call.args[0] === "exec")?.args).toContain("--full-auto");

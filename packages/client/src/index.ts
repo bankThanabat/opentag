@@ -440,7 +440,7 @@ export function createOpenTagClient(options: OpenTagClientOptions): OpenTagClien
         body: JSON.stringify({
           ...(input.id ? { id: input.id } : {}),
           approvalDecisionId: input.approvalDecisionId,
-          ...(input.selectedIntentIds?.length ? { selectedIntentIds: input.selectedIntentIds } : {}),
+          ...(input.selectedIntentIds !== undefined ? { selectedIntentIds: input.selectedIntentIds } : {}),
           ...(input.adapter ? { adapter: input.adapter } : {}),
           ...(input.execute !== undefined ? { execute: input.execute } : {})
         })
