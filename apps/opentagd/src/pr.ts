@@ -1,10 +1,11 @@
 import type { OpenTagEvent, OpenTagRun, OpenTagRunResult } from "@opentag/core";
 import { buildPullRequestBody, createPullRequestViaFetch, type FetchLike } from "@opentag/github";
-import { branchNameForRun, nodeCommandRunner, pushBranch, type CommandRunner } from "@opentag/runner";
+import { branchNameForRun, commitChangedFiles, nodeCommandRunner, pushBranch, type CommandRunner } from "@opentag/runner";
 import type { RepositoryBindingConfig } from "./config.js";
 
 export type PullRequestOptions = {
   githubToken?: string;
+  allowAutoCreatePullRequest?: boolean;
   commandRunner?: CommandRunner;
   fetchImpl?: FetchLike;
 };
@@ -21,17 +22,26 @@ export async function maybeCreatePullRequest(input: {
   options: PullRequestOptions;
 }): Promise<OpenTagRunResult> {
   if (!input.options.githubToken) return input.result;
+  if (!input.options.allowAutoCreatePullRequest) return input.result;
   if (input.event.source !== "github") return input.result;
   if (!hasPermission(input.event, "pr:create")) return input.result;
-  if (!input.result.changedFiles?.length) return input.result;
+  const changedFiles = input.result.changedFiles ?? [];
+  if (changedFiles.length === 0) return input.result;
 
   const owner = input.event.metadata["owner"];
   const repo = input.event.metadata["repo"];
   if (typeof owner !== "string" || typeof repo !== "string") return input.result;
 
   const branchName = branchNameForRun(input.run.id);
+  const runner = input.options.commandRunner ?? nodeCommandRunner;
+  await commitChangedFiles({
+    runner,
+    workspacePath: input.binding.checkoutPath,
+    files: changedFiles,
+    message: `OpenTag run ${input.run.id}`
+  });
   await pushBranch({
-    runner: input.options.commandRunner ?? nodeCommandRunner,
+    runner,
     workspacePath: input.binding.checkoutPath,
     remote: input.binding.pushRemote ?? "origin",
     branchName
@@ -53,7 +63,13 @@ export async function maybeCreatePullRequest(input: {
   return {
     ...input.result,
     createdPullRequestUrl: pullRequestUrl,
-    artifacts: [...(input.result.artifacts ?? []), { title: "Pull request", uri: pullRequestUrl }],
-    nextAction: `Review pull request: ${pullRequestUrl}`
+    artifacts: [...(input.result.artifacts ?? []), { kind: "pull_request", title: "Pull request", uri: pullRequestUrl }],
+    nextAction: {
+      summary: `Review pull request: ${pullRequestUrl}`,
+      hint: {
+        kind: "request_review",
+        metadata: { pullRequestUrl }
+      }
+    }
   };
 }

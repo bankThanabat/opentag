@@ -7,6 +7,14 @@ function slackUpdateUriFrom(postMessageUri: string): string {
   return postMessageUri.replace(/\/chat\.postMessage$/, "/chat.update");
 }
 
+function githubCommentUriFrom(input: { commentsUri: string; responseBody: { id?: number; url?: string } }): string | undefined {
+  if (input.responseBody.url) return input.responseBody.url;
+  if (typeof input.responseBody.id === "number") {
+    return input.commentsUri.replace(/\/comments$/, `/comments/${input.responseBody.id}`);
+  }
+  return undefined;
+}
+
 function slackBotTokenFor(input: {
   botToken?: string;
   botTokensByAgentId?: Record<string, string>;
@@ -25,26 +33,49 @@ function slackBotTokenFor(input: {
 
 export function createGitHubCallbackSink(input: { token?: string; fetchImpl?: FetchLike }): CallbackSink {
   const fetchImpl = input.fetchImpl ?? fetch;
+  const commentUriByKey = new Map<string, string>();
+  const deliveryByKey = new Map<string, Promise<void>>();
 
   return {
     async deliver(message: CallbackMessage): Promise<void> {
       if (message.provider !== "github") return;
       if (!input.token) return;
 
-      const response = await fetchImpl(message.uri, {
-        method: "POST",
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${input.token}`,
-          "content-type": "application/json",
-          "x-github-api-version": "2022-11-28"
-        },
-        body: JSON.stringify({ body: message.body })
-      });
+      const statusKey = message.statusMessageKey ?? `${message.runId}:status`;
+      const previous = deliveryByKey.get(statusKey) ?? Promise.resolve();
+      const current = previous.then(async () => {
+        const existingCommentUri = commentUriByKey.get(statusKey);
+        const response = await fetchImpl(existingCommentUri ?? message.uri, {
+          method: existingCommentUri ? "PATCH" : "POST",
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${input.token}`,
+            "content-type": "application/json",
+            "x-github-api-version": "2022-11-28"
+          },
+          body: JSON.stringify({ body: message.body })
+        });
 
-      if (!response.ok) {
-        throw new Error(`deliver GitHub callback failed: ${response.status} ${await response.text()}`);
-      }
+        if (!response.ok) {
+          throw new Error(`deliver GitHub callback failed: ${response.status} ${await response.text()}`);
+        }
+        if (!existingCommentUri) {
+          const body = (await response.json()) as { id?: number; url?: string };
+          const commentUri = githubCommentUriFrom({ commentsUri: message.uri, responseBody: body });
+          if (commentUri) {
+            commentUriByKey.set(statusKey, commentUri);
+          }
+        }
+        if (message.kind === "final") {
+          commentUriByKey.delete(statusKey);
+        }
+      });
+      deliveryByKey.set(statusKey, current);
+      await current.finally(() => {
+        if (deliveryByKey.get(statusKey) === current) {
+          deliveryByKey.delete(statusKey);
+        }
+      });
     }
   };
 }

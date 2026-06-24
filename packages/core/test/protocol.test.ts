@@ -1,0 +1,197 @@
+import { describe, expect, it } from "vitest";
+import {
+  assembleContextPacketFromEvent,
+  contextPacketFromEvent,
+  createAdapterMutationCompilerRegistry,
+  preflightMutationIntent,
+  protocolRunFieldsFromEvent,
+  workThreadFromEvent
+} from "../src/protocol.js";
+import type { OpenTagEvent } from "../src/schema.js";
+
+const githubEvent: OpenTagEvent = {
+  id: "evt_github_comment_1",
+  source: "github",
+  sourceEventId: "comment_1",
+  receivedAt: "2026-06-24T00:00:00.000Z",
+  actor: { provider: "github", providerUserId: "42", handle: "octocat" },
+  target: { mention: "@opentag", agentId: "opentag" },
+  command: { rawText: "fix the flaky test", intent: "fix", args: {} },
+  context: [
+    { kind: "github.issue", uri: "https://github.com/acme/demo/issues/7", visibility: "public" },
+    { kind: "github.comment", uri: "https://github.com/acme/demo/issues/7#issuecomment-1", visibility: "public" }
+  ],
+  permissions: [
+    { scope: "issue:comment", reason: "reply to source thread" },
+    { scope: "repo:write", reason: "commit on isolated branch" },
+    { scope: "pr:create", reason: "open a pull request" }
+  ],
+  callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/7/comments", threadKey: "acme/demo" },
+  metadata: { owner: "acme", repo: "demo", issueNumber: 7 }
+};
+
+describe("protocol helpers", () => {
+  it("derives a work thread for a canonical GitHub issue event", () => {
+    const thread = workThreadFromEvent(githubEvent);
+
+    expect(thread).toMatchObject({
+      workItemReference: {
+        provider: "github",
+        kind: "issue",
+        externalId: "acme/demo#7"
+      },
+      primaryAnchor: {
+        provider: "github",
+        controlPlane: true,
+        canApprove: true
+      }
+    });
+  });
+
+  it("does not invent a canonical work item when only a Slack thread is known", () => {
+    const slackEvent: OpenTagEvent = {
+      ...githubEvent,
+      id: "evt_slack_1",
+      source: "slack",
+      sourceEventId: "Ev123",
+      actor: { provider: "slack", providerUserId: "U123", handle: "U123", organizationId: "T123" },
+      context: [
+        { kind: "url", uri: "slack://team/T123/channel/C123/message/1710000000.000100", visibility: "organization" },
+        { kind: "text", uri: "<@U999> fix this", visibility: "organization" }
+      ],
+      permissions: [{ scope: "chat:postMessage", reason: "reply in Slack thread" }],
+      callback: {
+        provider: "slack",
+        uri: "https://slack.com/api/chat.postMessage",
+        threadKey: "T123|C123|1710000000.000100"
+      },
+      metadata: { owner: "acme", repo: "demo", repoProvider: "github" }
+    };
+
+    expect(workThreadFromEvent(slackEvent)).toBeUndefined();
+    expect(protocolRunFieldsFromEvent(slackEvent)).toMatchObject({
+      contextPacket: {
+        summary: "fix the flaky test"
+      }
+    });
+  });
+
+  it("builds a context packet with assembly metadata and write-scope risk", () => {
+    const packet = contextPacketFromEvent(githubEvent);
+
+    expect(packet.sourcePointers).toHaveLength(2);
+    expect(packet.assembly?.stages).toEqual(["collect", "classify", "filter", "preserve", "summarize", "budget", "emit"]);
+    expect(packet.risks?.[0]).toContain("repo:write");
+    expect(packet.exclusions?.[0]).toContain("explicit capability");
+  });
+
+  it("applies context packet budget as an explicit assembly stage", () => {
+    const packet = assembleContextPacketFromEvent(
+      {
+        ...githubEvent,
+        context: [
+          ...githubEvent.context,
+          { kind: "github.repo", uri: "https://github.com/acme/demo", visibility: "public" },
+          { kind: "url", uri: "https://example.com/background", visibility: "public" }
+        ]
+      },
+      "2026-06-24T00:00:00.000Z",
+      { budgetTokens: 500 }
+    );
+
+    expect(packet.sourcePointers).toHaveLength(1);
+    expect(packet.assembly?.budgetTokens).toBe(500);
+    expect(packet.assembly?.stages).toContain("budget");
+  });
+
+  it("allows context packet assembly hooks to customize stages", () => {
+    const packet = assembleContextPacketFromEvent(githubEvent, "2026-06-24T00:00:00.000Z", {
+      hooks: {
+        collect({ pointers }) {
+          return pointers.slice(0, 1);
+        },
+        summarize({ summary }) {
+          return `Hooked: ${summary}`;
+        },
+        preserve({ facts }) {
+          return [...facts, { text: "hook-added fact" }];
+        }
+      }
+    });
+
+    expect(packet.summary).toBe("Hooked: fix the flaky test");
+    expect(packet.sourcePointers).toHaveLength(1);
+    expect(packet.facts?.map((fact) => fact.text)).toContain("hook-added fact");
+  });
+
+  it("compiles mutation intents through adapter compiler registry", () => {
+    const registry = createAdapterMutationCompilerRegistry([
+      {
+        adapter: "test",
+        compile(intent) {
+          return {
+            ok: true,
+            adapter: "test",
+            intentId: intent.intentId,
+            operation: { action: intent.action }
+          };
+        }
+      }
+    ]);
+
+    expect(
+      registry.compile("test", [{ intentId: "intent_1", domain: "labels", action: "add_label", summary: "Add label." }])
+    ).toEqual([{ ok: true, adapter: "test", intentId: "intent_1", operation: { action: "add_label" } }]);
+    expect(registry.compile("missing", [{ intentId: "intent_2", domain: "labels", action: "add_label", summary: "Add label." }])).toEqual([
+      {
+        ok: false,
+        adapter: "missing",
+        outcome: {
+          intentId: "intent_2",
+          outcome: "unsupported",
+          message: "No adapter mutation compiler is registered for missing."
+        }
+      }
+    ]);
+  });
+
+  it("preflights mutation intents through platform permission and OpenTag policy", () => {
+    const intent = {
+      intentId: "intent_label_1",
+      domain: "labels" as const,
+      action: "add_label",
+      summary: "Add the bug label.",
+      params: { label: "bug" }
+    };
+
+    const denied = preflightMutationIntent({
+      intent,
+      permissions: githubEvent.permissions,
+      policyRules: []
+    });
+    expect(denied.outcome).toMatchObject({
+      intentId: "intent_label_1",
+      outcome: "unsupported"
+    });
+    expect(denied.outcome.message).toContain("policy denied");
+
+    const allowed = preflightMutationIntent({
+      intent,
+      permissions: githubEvent.permissions,
+      policyRules: [
+        {
+          id: "manual_approval",
+          scope: "primary_anchor_override",
+          effect: "allow",
+          capabilityId: "set_labels",
+          reason: "Manual approval selected this label intent."
+        }
+      ]
+    });
+    expect(allowed.policyResolution?.decision).toBe("allow");
+    expect(allowed.outcome).toMatchObject({
+      intentId: "intent_label_1",
+      outcome: "skipped"
+    });
+  });
+});

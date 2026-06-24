@@ -43,6 +43,12 @@ export function renderSlackAcknowledgement(runId: string): string {
   return `I picked this up: \`${runId}\``;
 }
 
+function nextActionSummary(result: OpenTagRunResult): string | undefined {
+  if (!result.nextAction) return undefined;
+  if (typeof result.nextAction === "string") return result.nextAction;
+  return result.nextAction.summary;
+}
+
 export function renderSlackFinalResult(result: OpenTagRunResult): string {
   const lines = [`Finished with *${result.conclusion}*.`, "", markdownToSlackMrkdwn(result.summary)];
 
@@ -53,8 +59,9 @@ export function renderSlackFinalResult(result: OpenTagRunResult): string {
     }
   }
 
-  if (result.nextAction) {
-    lines.push("", `*Next action*: ${markdownToSlackMrkdwn(result.nextAction)}`);
+  const nextAction = nextActionSummary(result);
+  if (nextAction) {
+    lines.push("", `*Next action*: ${markdownToSlackMrkdwn(nextAction)}`);
   }
 
   return lines.join("\n");
@@ -82,12 +89,13 @@ export function createSlackFinalResultBlocks(result: OpenTagRunResult): SlackBlo
     });
   }
 
-  if (result.nextAction) {
+  const nextAction = nextActionSummary(result);
+  if (nextAction) {
     blocks.push({
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Next action*: ${markdownToSlackMrkdwn(result.nextAction)}`
+        text: `*Next action*: ${markdownToSlackMrkdwn(nextAction)}`
       }
     });
   }

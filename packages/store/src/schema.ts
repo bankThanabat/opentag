@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const runs = sqliteTable(
   "runs",
@@ -11,6 +11,14 @@ export const runs = sqliteTable(
     resultJson: text("result_json"),
     assignedRunnerId: text("assigned_runner_id"),
     executor: text("executor"),
+    parentRunId: text("parent_run_id"),
+    triggeredByActionJson: text("triggered_by_action_json"),
+    sourceProposalId: text("source_proposal_id"),
+    sourceApplyPlanId: text("source_apply_plan_id"),
+    repoProvider: text("repo_provider"),
+    repoOwner: text("repo_owner"),
+    repoName: text("repo_name"),
+    workThreadId: text("work_thread_id"),
     leasedAt: text("leased_at"),
     leaseExpiresAt: text("lease_expires_at"),
     heartbeatAt: text("heartbeat_at"),
@@ -19,15 +27,48 @@ export const runs = sqliteTable(
   },
   (table) => ({
     statusIdx: index("runs_status_idx").on(table.status),
-    runnerIdx: index("runs_runner_idx").on(table.assignedRunnerId)
+    runnerIdx: index("runs_runner_idx").on(table.assignedRunnerId),
+    repoIdx: index("runs_repo_idx").on(table.repoProvider, table.repoOwner, table.repoName),
+    workThreadIdx: index("runs_work_thread_idx").on(table.workThreadId)
   })
 );
 
-export const runEvents = sqliteTable("run_events", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const runEvents = sqliteTable(
+  "run_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: text("run_id").notNull(),
+    type: text("type").notNull(),
+    visibility: text("visibility").notNull().default("audit"),
+    importance: text("importance").notNull().default("normal"),
+    message: text("message"),
+    payloadJson: text("payload_json").notNull(),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => ({
+    runIdx: index("run_events_run_idx").on(table.runId)
+  })
+);
+
+export const suggestedChanges = sqliteTable("suggested_changes", {
+  proposalId: text("proposal_id").primaryKey(),
   runId: text("run_id").notNull(),
-  type: text("type").notNull(),
-  payloadJson: text("payload_json").notNull(),
+  snapshotJson: text("snapshot_json").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
+export const approvalDecisions = sqliteTable("approval_decisions", {
+  id: text("id").primaryKey(),
+  proposalId: text("proposal_id").notNull(),
+  decisionJson: text("decision_json").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
+export const applyPlans = sqliteTable("apply_plans", {
+  id: text("id").primaryKey(),
+  proposalId: text("proposal_id").notNull(),
+  approvalDecisionId: text("approval_decision_id").notNull(),
+  planJson: text("plan_json").notNull(),
   createdAt: text("created_at").notNull()
 });
 
@@ -56,6 +97,36 @@ export const repoBindings = sqliteTable(
   })
 );
 
+export const repoPolicyRules = sqliteTable(
+  "repo_policy_rules",
+  {
+    id: text("id").notNull(),
+    provider: text("provider").notNull(),
+    owner: text("owner").notNull(),
+    repo: text("repo").notNull(),
+    ruleJson: text("rule_json").notNull(),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.provider, table.owner, table.repo, table.id] })
+  })
+);
+
+export const repoMutationMappings = sqliteTable(
+  "repo_mutation_mappings",
+  {
+    id: text("id").notNull(),
+    provider: text("provider").notNull(),
+    owner: text("owner").notNull(),
+    repo: text("repo").notNull(),
+    mappingJson: text("mapping_json").notNull(),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.provider, table.owner, table.repo, table.id] })
+  })
+);
+
 export const slackChannelBindings = sqliteTable(
   "slack_channel_bindings",
   {
@@ -81,6 +152,14 @@ export function migrateSchema(sqlite: Database.Database): void {
       result_json TEXT,
       assigned_runner_id TEXT,
       executor TEXT,
+      parent_run_id TEXT,
+      triggered_by_action_json TEXT,
+      source_proposal_id TEXT,
+      source_apply_plan_id TEXT,
+      repo_provider TEXT,
+      repo_owner TEXT,
+      repo_name TEXT,
+      work_thread_id TEXT,
       leased_at TEXT,
       lease_expires_at TEXT,
       heartbeat_at TEXT,
@@ -89,11 +168,36 @@ export function migrateSchema(sqlite: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS runs_status_idx ON runs(status);
     CREATE INDEX IF NOT EXISTS runs_runner_idx ON runs(assigned_runner_id);
+    CREATE INDEX IF NOT EXISTS runs_repo_idx ON runs(repo_provider, repo_owner, repo_name);
+    CREATE INDEX IF NOT EXISTS runs_work_thread_idx ON runs(work_thread_id);
     CREATE TABLE IF NOT EXISTS run_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL,
       type TEXT NOT NULL,
+      visibility TEXT NOT NULL DEFAULT 'audit',
+      importance TEXT NOT NULL DEFAULT 'normal',
+      message TEXT,
       payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS run_events_run_idx ON run_events(run_id);
+    CREATE TABLE IF NOT EXISTS suggested_changes (
+      proposal_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS approval_decisions (
+      id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL,
+      decision_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS apply_plans (
+      id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL,
+      approval_decision_id TEXT NOT NULL,
+      plan_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS runners (
@@ -115,6 +219,28 @@ export function migrateSchema(sqlite: Database.Database): void {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS repo_bindings_provider_owner_repo_idx
       ON repo_bindings(provider, owner, repo);
+    CREATE TABLE IF NOT EXISTS repo_policy_rules (
+      id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      rule_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (provider, owner, repo, id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS repo_policy_rules_repo_id_idx
+      ON repo_policy_rules(provider, owner, repo, id);
+    CREATE TABLE IF NOT EXISTS repo_mutation_mappings (
+      id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      mapping_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (provider, owner, repo, id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS repo_mutation_mappings_repo_id_idx
+      ON repo_mutation_mappings(provider, owner, repo, id);
     CREATE TABLE IF NOT EXISTS slack_channel_bindings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       team_id TEXT NOT NULL,
@@ -145,4 +271,44 @@ export function migrateSchema(sqlite: Database.Database): void {
   if (!runColumnNames.has("heartbeat_at")) {
     sqlite.exec("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT");
   }
+  if (!runColumnNames.has("parent_run_id")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN parent_run_id TEXT");
+  }
+  if (!runColumnNames.has("triggered_by_action_json")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN triggered_by_action_json TEXT");
+  }
+  if (!runColumnNames.has("source_proposal_id")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN source_proposal_id TEXT");
+  }
+  if (!runColumnNames.has("source_apply_plan_id")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN source_apply_plan_id TEXT");
+  }
+  if (!runColumnNames.has("repo_provider")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN repo_provider TEXT");
+  }
+  if (!runColumnNames.has("repo_owner")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN repo_owner TEXT");
+  }
+  if (!runColumnNames.has("repo_name")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN repo_name TEXT");
+  }
+  if (!runColumnNames.has("work_thread_id")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN work_thread_id TEXT");
+  }
+  sqlite.exec("CREATE INDEX IF NOT EXISTS runs_repo_idx ON runs(repo_provider, repo_owner, repo_name)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS runs_work_thread_idx ON runs(work_thread_id)");
+  const runEventColumns = sqlite.prepare("PRAGMA table_info(run_events)").all() as { name: string }[];
+  const runEventColumnNames = new Set(runEventColumns.map((column) => column.name));
+  if (!runEventColumnNames.has("visibility")) {
+    sqlite.exec("ALTER TABLE run_events ADD COLUMN visibility TEXT NOT NULL DEFAULT 'audit'");
+  }
+  if (!runEventColumnNames.has("importance")) {
+    sqlite.exec("ALTER TABLE run_events ADD COLUMN importance TEXT NOT NULL DEFAULT 'normal'");
+  }
+  if (!runEventColumnNames.has("message")) {
+    sqlite.exec("ALTER TABLE run_events ADD COLUMN message TEXT");
+  }
+  sqlite.exec("CREATE INDEX IF NOT EXISTS run_events_run_idx ON run_events(run_id)");
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS repo_policy_rules_repo_id_idx ON repo_policy_rules(provider, owner, repo, id)");
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS repo_mutation_mappings_repo_id_idx ON repo_mutation_mappings(provider, owner, repo, id)");
 }

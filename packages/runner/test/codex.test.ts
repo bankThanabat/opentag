@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createCodexExecutor } from "../src/codex.js";
 import type { CommandRunner } from "../src/command.js";
-import { branchNameForRun, parseChangedFiles } from "../src/git.js";
+import { branchNameForRun, commitChangedFiles, parseChangedFiles } from "../src/git.js";
 
 describe("Codex executor", () => {
   it("creates an isolated branch, runs codex exec, and reports changed files", async () => {
@@ -53,7 +53,8 @@ describe("Codex executor", () => {
         runId: "run_1",
         workspacePath: "/tmp/demo",
         command: { rawText: "fix this", intent: "fix", args: {} },
-        context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }]
+        context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }],
+        baseBranch: "main"
       },
       {
         emit: async (event) => {
@@ -62,7 +63,7 @@ describe("Codex executor", () => {
       }
     );
 
-    expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "checkout -B opentag/run_1")).toBe(true);
+    expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "checkout -B opentag/run_1 main")).toBe(true);
     expect(calls.some((call) => call.command === "codex" && call.args[0] === "exec")).toBe(true);
     expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "clean -fd -- .omx")).toBe(true);
     expect(calls.find((call) => call.command === "codex" && call.args[0] === "exec")?.args).toContain("--full-auto");
@@ -71,6 +72,23 @@ describe("Codex executor", () => {
     expect(events).toEqual(["executor.started", "executor.progress", "executor.progress", "executor.completed"]);
     expect(result.changedFiles).toEqual(["src/demo.ts", "test/demo.test.ts"]);
     expect(result.summary).toContain("Implemented the requested fix.");
+    expect(result.artifacts?.[0]).toMatchObject({ kind: "patch", title: "Run branch", uri: "opentag/run_1" });
+    expect(result.suggestedChanges?.[0]).toMatchObject({
+      proposalId: "proposal_run_1",
+      sourceRunId: "run_1",
+      intents: [
+        { intentId: "proposal_run_1_link_branch", domain: "artifact_links", action: "link_artifact" },
+        { intentId: "proposal_run_1_request_review", domain: "review", action: "request_review" }
+      ]
+    });
+    expect(result.nextAction).toMatchObject({
+      summary: "Review the local branch and explicitly create a pull request if the proposal is acceptable.",
+      hint: {
+        kind: "create_pull_request",
+        targetId: "proposal_run_1",
+        selectedIntentIds: ["proposal_run_1_link_branch", "proposal_run_1_request_review"]
+      }
+    });
   });
 
   it("refuses to run when the workspace has uncommitted changes", async () => {
@@ -104,5 +122,24 @@ describe("git helpers", () => {
 
   it("sanitizes branch names", () => {
     expect(branchNameForRun("run/with spaces")).toBe("opentag/run-with-spaces");
+  });
+
+  it("stages and commits selected changed files", async () => {
+    const calls: string[] = [];
+    const runner: CommandRunner = {
+      async run(command, args) {
+        calls.push(`${command} ${args.join(" ")}`);
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+    };
+
+    await commitChangedFiles({
+      runner,
+      workspacePath: "/tmp/demo",
+      files: ["README.md", "src/demo.ts"],
+      message: "OpenTag run run_1"
+    });
+
+    expect(calls).toEqual(["git add -- README.md src/demo.ts", "git commit -m OpenTag run run_1"]);
   });
 });

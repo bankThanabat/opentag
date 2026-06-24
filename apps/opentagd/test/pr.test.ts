@@ -51,6 +51,7 @@ describe("maybeCreatePullRequest", () => {
       result,
       options: {
         githubToken: "ghs_test",
+        allowAutoCreatePullRequest: true,
         commandRunner: {
           async run(command, args) {
             commands.push(`${command} ${args.join(" ")}`);
@@ -64,10 +65,17 @@ describe("maybeCreatePullRequest", () => {
       }
     });
 
-    expect(commands).toEqual(["git push -u origin opentag/run_1"]);
+    expect(commands).toEqual(["git add -- src/demo.ts", "git commit -m OpenTag run run_1", "git push -u origin opentag/run_1"]);
     expect(requests).toEqual(["https://api.github.com/repos/acme/demo/pulls"]);
     expect(updated.createdPullRequestUrl).toBe("https://github.com/acme/demo/pull/1");
-    expect(updated.nextAction).toContain("https://github.com/acme/demo/pull/1");
+    expect(updated.artifacts?.at(-1)).toMatchObject({ kind: "pull_request", uri: "https://github.com/acme/demo/pull/1" });
+    expect(updated.nextAction).toMatchObject({
+      summary: "Review pull request: https://github.com/acme/demo/pull/1",
+      hint: {
+        kind: "request_review",
+        metadata: { pullRequestUrl: "https://github.com/acme/demo/pull/1" }
+      }
+    });
   });
 
   it("leaves the result unchanged without a GitHub token", async () => {
@@ -80,5 +88,27 @@ describe("maybeCreatePullRequest", () => {
         options: {}
       })
     ).resolves.toBe(result);
+  });
+
+  it("leaves the result unchanged unless auto PR creation is explicitly enabled", async () => {
+    const commands: string[] = [];
+    await expect(
+      maybeCreatePullRequest({
+        run,
+        event,
+        binding: { provider: "github", owner: "acme", repo: "demo", checkoutPath: "/tmp/demo" },
+        result,
+        options: {
+          githubToken: "ghs_test",
+          commandRunner: {
+            async run(command, args) {
+              commands.push(`${command} ${args.join(" ")}`);
+              return { exitCode: 0, stdout: "", stderr: "" };
+            }
+          }
+        }
+      })
+    ).resolves.toBe(result);
+    expect(commands).toEqual([]);
   });
 });

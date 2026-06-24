@@ -8,7 +8,9 @@
     "build": "pnpm -r build",
     "test": "vitest run",
     "typecheck": "tsc -b",
-    "lint": "pnpm -r lint"
+    "lint": "pnpm -r lint",
+    "smoke:protocol": "NODE_OPTIONS='--conditions=development' pnpm --dir apps/dispatcher exec tsx ../../scripts/test/protocol-runtime-smoke.ts",
+    "smoke:slack-protocol": "NODE_OPTIONS='--conditions=development' pnpm --dir apps/dispatcher exec tsx ../../scripts/test/slack-protocol-runtime-smoke.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

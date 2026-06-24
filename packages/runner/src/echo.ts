@@ -31,7 +31,11 @@ export function createEchoExecutor(): ExecutorAdapter {
             outcome: "passed",
             excerpt: input.command.rawText
           }
-        ]
+        ],
+        nextAction: {
+          summary: "No external state change is suggested for the echo executor result.",
+          hint: { kind: "none" }
+        }
       };
     },
     async cancel() {

@@ -39,8 +39,9 @@ export async function createRunBranch(input: {
   runner: CommandRunner;
   workspacePath: string;
   branchName: string;
+  startPoint?: string;
 }): Promise<void> {
-  const result = await input.runner.run("git", ["checkout", "-B", input.branchName], { cwd: input.workspacePath });
+  const result = await input.runner.run("git", ["checkout", "-B", input.branchName, ...(input.startPoint ? [input.startPoint] : [])], { cwd: input.workspacePath });
   await assertCommandSucceeded(result, "create run branch");
 }
 
@@ -48,6 +49,19 @@ export async function changedFiles(input: { runner: CommandRunner; workspacePath
   const result = await input.runner.run("git", ["status", "--porcelain"], { cwd: input.workspacePath });
   await assertCommandSucceeded(result, "read changed files");
   return parseChangedFiles(result.stdout);
+}
+
+export async function commitChangedFiles(input: {
+  runner: CommandRunner;
+  workspacePath: string;
+  files: string[];
+  message: string;
+}): Promise<void> {
+  if (input.files.length === 0) return;
+  const addResult = await input.runner.run("git", ["add", "--", ...input.files], { cwd: input.workspacePath });
+  await assertCommandSucceeded(addResult, "stage changed files");
+  const commitResult = await input.runner.run("git", ["commit", "-m", input.message], { cwd: input.workspacePath });
+  await assertCommandSucceeded(commitResult, "commit changed files");
 }
 
 export async function cleanupInternalArtifacts(input: { runner: CommandRunner; workspacePath: string }): Promise<string[]> {

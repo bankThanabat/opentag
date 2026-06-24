@@ -4,10 +4,12 @@ import type { ExecutorAdapter } from "./executor.js";
 import { branchNameForRun, changedFiles, cleanupInternalArtifacts, createRunBranch } from "./git.js";
 import { createExecutorRunResult } from "./result.js";
 
-export type CodexExecutorOptions = {
+export type ClaudeCodeExecutorOptions = {
   runner?: CommandRunner;
-  codexCommand?: string;
+  claudeCommand?: string;
   model?: string;
+  permissionMode?: "acceptEdits" | "auto" | "bypassPermissions" | "default" | "plan";
+  dangerouslySkipPermissions?: boolean;
 };
 
 function contextLines(context: ContextPointer[]): string {
@@ -30,28 +32,33 @@ function buildPrompt(input: {
     "Context pointers:",
     contextLines(input.context),
     "",
-    "Work autonomously but keep the change narrow. Run relevant verification if you modify files. End with a concise summary."
+    "Work autonomously but keep the change narrow. Run relevant verification if you modify files.",
+    "End with a concise summary of what changed, what was verified, and the recommended next action."
   ].join("\n");
 }
 
-export function createCodexExecutor(options: CodexExecutorOptions = {}): ExecutorAdapter {
+export function createClaudeCodeExecutor(options: ClaudeCodeExecutorOptions = {}): ExecutorAdapter {
   const runner = options.runner ?? nodeCommandRunner;
-  const codexCommand = options.codexCommand ?? "codex";
+  const claudeCommand = options.claudeCommand ?? "claude";
 
   return {
-    id: "codex",
-    displayName: "Codex Executor",
+    id: "claude-code",
+    displayName: "Claude Code Executor",
     async canRun(input) {
-      const codexVersion = await runner.run(codexCommand, ["--version"], { cwd: input.workspacePath });
-      if (codexVersion.exitCode !== 0) {
-        return { ready: false, reason: `Codex CLI is not available: ${codexVersion.stderr || codexVersion.stdout}` };
+      try {
+        const claudeVersion = await runner.run(claudeCommand, ["--version"], { cwd: input.workspacePath });
+        if (claudeVersion.exitCode !== 0) {
+          return { ready: false, reason: `Claude Code CLI is not available: ${claudeVersion.stderr || claudeVersion.stdout}` };
+        }
+      } catch (error) {
+        return { ready: false, reason: `Claude Code CLI is not available: ${error instanceof Error ? error.message : String(error)}` };
       }
       const gitStatus = await runner.run("git", ["status", "--porcelain"], { cwd: input.workspacePath });
       if (gitStatus.exitCode !== 0) {
         return { ready: false, reason: `Workspace is not a git checkout: ${gitStatus.stderr || gitStatus.stdout}` };
       }
       if (gitStatus.stdout.trim().length > 0) {
-        return { ready: false, reason: "Workspace has uncommitted changes; refusing to run Codex executor." };
+        return { ready: false, reason: "Workspace has uncommitted changes; refusing to run Claude Code executor." };
       }
       return { ready: true };
     },
@@ -71,20 +78,22 @@ export function createCodexExecutor(options: CodexExecutorOptions = {}): Executo
 
       await sink.emit({
         type: "executor.progress",
-        message: "Starting codex exec",
+        message: "Starting claude --print",
         at: new Date().toISOString()
       });
 
       const args = [
-        "exec",
-        "--cd",
-        input.workspacePath,
-        "--full-auto",
-        "--ephemeral",
+        "--print",
+        "--input-format",
+        "text",
+        "--output-format",
+        "text",
+        "--no-session-persistence",
         ...(options.model ? ["--model", options.model] : []),
-        "-"
+        ...(options.permissionMode ? ["--permission-mode", options.permissionMode] : []),
+        ...(options.dangerouslySkipPermissions ? ["--dangerously-skip-permissions"] : [])
       ];
-      const codexResult = await runner.run(codexCommand, args, {
+      const claudeResult = await runner.run(claudeCommand, args, {
         cwd: input.workspacePath,
         input: buildPrompt({
           runId: input.runId,
@@ -92,7 +101,7 @@ export function createCodexExecutor(options: CodexExecutorOptions = {}): Executo
           context: input.context
         })
       });
-      await assertCommandSucceeded(codexResult, "codex exec");
+      await assertCommandSucceeded(claudeResult, "claude --print");
 
       const cleanedArtifacts = await cleanupInternalArtifacts({ runner, workspacePath: input.workspacePath });
       if (cleanedArtifacts.length > 0) {
@@ -106,18 +115,18 @@ export function createCodexExecutor(options: CodexExecutorOptions = {}): Executo
       const files = await changedFiles({ runner, workspacePath: input.workspacePath });
       await sink.emit({
         type: "executor.completed",
-        message: `Codex executor completed with ${files.length} changed file(s)`,
+        message: `Claude Code executor completed with ${files.length} changed file(s)`,
         at: new Date().toISOString()
       });
 
-      const output = codexResult.stdout.trim() || codexResult.stderr.trim() || "Codex completed without textual output.";
+      const output = claudeResult.stdout.trim() || claudeResult.stderr.trim() || "Claude Code completed without textual output.";
       return createExecutorRunResult({
-        executorName: "Codex",
+        executorName: "Claude Code",
         runId: input.runId,
         branchName,
         output,
         changedFiles: files,
-        verificationCommand: "codex exec"
+        verificationCommand: "claude --print"
       });
     },
     async cancel() {

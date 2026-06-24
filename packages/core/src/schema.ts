@@ -31,6 +31,15 @@ export const ContextPointerSchema = z.object({
     "github.pull_request",
     "github.comment",
     "github.commit",
+    "slack.channel",
+    "slack.thread",
+    "slack.message",
+    "lark.chat",
+    "lark.thread",
+    "lark.message",
+    "lark.doc",
+    "lark.base",
+    "lark.base_record",
     "file",
     "url",
     "text"
@@ -38,6 +47,39 @@ export const ContextPointerSchema = z.object({
   uri: z.string().min(1),
   title: z.string().min(1).optional(),
   visibility: z.enum(["public", "private", "organization"])
+});
+
+export const ContextPacketAssemblyStageSchema = z.enum(["collect", "classify", "filter", "preserve", "summarize", "budget", "emit"]);
+
+export const ContextPacketSchema = z.object({
+  summary: z.string().min(1),
+  sourcePointers: z.array(ContextPointerSchema),
+  facts: z
+    .array(
+      z.object({
+        text: z.string().min(1),
+        sourceUri: z.string().min(1).optional()
+      })
+    )
+    .optional(),
+  risks: z.array(z.string().min(1)).optional(),
+  exclusions: z.array(z.string().min(1)).optional(),
+  mustPreserve: z.array(z.string().min(1)).optional(),
+  redactions: z
+    .array(
+      z.object({
+        reason: z.string().min(1),
+        sourceUri: z.string().min(1).optional()
+      })
+    )
+    .optional(),
+  assembly: z
+    .object({
+      stages: z.array(ContextPacketAssemblyStageSchema),
+      budgetTokens: z.number().int().positive().optional(),
+      emittedAt: z.string().datetime().optional()
+    })
+    .optional()
 });
 
 export const PermissionGrantSchema = z.object({
@@ -55,10 +97,220 @@ export const PermissionGrantSchema = z.object({
   expiresAt: z.string().datetime().optional()
 });
 
+export const CapabilityClassSchema = z.enum(["read_only", "callback", "external_write"]);
+
+export const CapabilityContractSchema = z.object({
+  id: z.string().min(1),
+  semanticAction: z.string().min(1),
+  capabilityClass: CapabilityClassSchema,
+  requiresExplicitIntent: z.boolean(),
+  mayAutoApplyByPolicy: z.boolean(),
+  adapterTargets: z.array(z.string().min(1)),
+  requiredPermissionScopes: z.array(PermissionGrantSchema.shape.scope),
+  requiredExecutorConditions: z.array(z.string().min(1)).optional()
+});
+
+export const PolicyScopeSchema = z.enum([
+  "organization_default",
+  "adapter_surface_default",
+  "work_context_owner_container",
+  "work_item_override",
+  "primary_anchor_override"
+]);
+
+export const PolicyEffectSchema = z.enum(["allow", "deny"]);
+
+export const PolicyRuleSchema = z.object({
+  id: z.string().min(1),
+  scope: PolicyScopeSchema,
+  effect: PolicyEffectSchema,
+  capabilityId: z.string().min(1).optional(),
+  mutationDomain: z.string().min(1).optional(),
+  reason: z.string().min(1)
+});
+
+export const PolicyResolutionSchema = z.object({
+  capabilityId: z.string().min(1),
+  decision: PolicyEffectSchema,
+  resolvedBy: PolicyScopeSchema,
+  rules: z.array(PolicyRuleSchema),
+  reason: z.string().min(1)
+});
+
+export const AdapterMutationMappingSchema = z.object({
+  id: z.string().min(1),
+  adapter: z.string().min(1),
+  domain: z.enum(["status", "priority"]),
+  strategy: z.enum(["label"]),
+  values: z.record(z.string().min(1)),
+  description: z.string().min(1).optional()
+});
+
+export const SuccessMetricNameSchema = z.enum([
+  "time_to_first_useful_artifact",
+  "thread_noise_ratio",
+  "artifact_acceptance_rate",
+  "context_reuse_rate",
+  "external_write_approval_rate",
+  "stale_proposal_rate"
+]);
+
 export const CallbackRouteSchema = z.object({
   provider: z.enum(["github", "slack", "lark", "webhook"]),
   uri: z.string().min(1),
   threadKey: z.string().min(1).optional()
+});
+
+export const WorkItemReferenceSchema = z.object({
+  provider: z.string().min(1),
+  kind: z.string().min(1),
+  externalId: z.string().min(1),
+  uri: z.string().min(1),
+  title: z.string().min(1).optional(),
+  ownerContainer: z
+    .object({
+      provider: z.string().min(1),
+      id: z.string().min(1),
+      uri: z.string().min(1).optional()
+    })
+    .optional(),
+  metadata: z.record(z.unknown()).optional()
+});
+
+export const ConversationAnchorSchema = z.object({
+  provider: z.enum(["github", "slack", "lark", "webhook"]),
+  kind: z.string().min(1),
+  externalId: z.string().min(1),
+  uri: z.string().min(1),
+  threadKey: z.string().min(1).optional(),
+  controlPlane: z.boolean().optional(),
+  canApprove: z.boolean().optional(),
+  metadata: z.record(z.unknown()).optional()
+});
+
+export const WorkThreadSchema = z.object({
+  id: z.string().min(1).optional(),
+  workItemReference: WorkItemReferenceSchema,
+  primaryAnchor: ConversationAnchorSchema,
+  secondaryAnchors: z.array(ConversationAnchorSchema).optional()
+});
+
+export const RunEventVisibilitySchema = z.enum(["human", "audit", "debug"]);
+export const RunEventImportanceSchema = z.enum(["low", "normal", "high", "blocking"]);
+
+export const RunEventSchema = z.object({
+  id: z.union([z.string().min(1), z.number().int().nonnegative()]).optional(),
+  runId: z.string().min(1),
+  type: z.string().min(1),
+  createdAt: z.string().datetime(),
+  visibility: RunEventVisibilitySchema,
+  importance: RunEventImportanceSchema,
+  message: z.string().min(1).optional(),
+  payload: z.unknown().optional(),
+  sourcePointer: ContextPointerSchema.optional()
+});
+
+export const ArtifactKindSchema = z.enum([
+  "root_cause_note",
+  "suggested_changes_snapshot",
+  "verification_summary",
+  "patch",
+  "pull_request",
+  "risk_note",
+  "follow_up_task",
+  "audit_trail",
+  "decision_record"
+]);
+
+export const ActionHintSchema = z.object({
+  kind: z.enum([
+    "apply_suggested_changes",
+    "generate_patch",
+    "request_human_decision",
+    "link_to_work_item",
+    "request_review",
+    "create_pull_request",
+    "none"
+  ]),
+  targetId: z.string().min(1).optional(),
+  selectedIntentIds: z.array(z.string().min(1)).optional(),
+  metadata: z.record(z.unknown()).optional()
+});
+
+export const NextActionSchema = z.union([
+  z.string().min(1),
+  z.object({
+    summary: z.string().min(1),
+    hint: ActionHintSchema
+  })
+]);
+
+export const CanonicalMutationDomainSchema = z.enum(["status", "assignee", "priority", "labels", "schedule", "review", "artifact_links"]);
+
+export const MutationIntentSchema = z.object({
+  intentId: z.string().min(1),
+  domain: CanonicalMutationDomainSchema,
+  action: z.string().min(1),
+  summary: z.string().min(1),
+  params: z.record(z.unknown()).optional(),
+  supersedesIntentIds: z.array(z.string().min(1)).optional(),
+  sourcePointer: ContextPointerSchema.optional()
+});
+
+export const SuggestedChangesSnapshotSchema = z.object({
+  proposalId: z.string().min(1),
+  createdAt: z.string().datetime(),
+  sourceRunId: z.string().min(1).optional(),
+  workThread: WorkThreadSchema.optional(),
+  summary: z.string().min(1),
+  intents: z.array(MutationIntentSchema).min(1),
+  preconditions: z.array(z.string().min(1)).optional(),
+  supersedesProposalIds: z.array(z.string().min(1)).optional(),
+  metadata: z.record(z.unknown()).optional()
+});
+
+export const MutationIntentActionabilitySchema = z.object({
+  proposalId: z.string().min(1),
+  intentId: z.string().min(1),
+  domain: CanonicalMutationDomainSchema,
+  status: z.enum(["current", "superseded", "stale", "conflicted"]),
+  supersededByProposalId: z.string().min(1).optional(),
+  supersededByIntentId: z.string().min(1).optional(),
+  reason: z.string().min(1).optional()
+});
+
+export const ProposalLineageSchema = z.object({
+  scopeKey: z.string().min(1),
+  entries: z.array(MutationIntentActionabilitySchema)
+});
+
+export const ApprovalDecisionSchema = z.object({
+  id: z.string().min(1),
+  proposalId: z.string().min(1),
+  approvedIntentIds: z.array(z.string().min(1)),
+  rejectedIntentIds: z.array(z.string().min(1)).optional(),
+  approvedBy: ActorIdentitySchema,
+  approvedAt: z.string().datetime(),
+  scope: z.enum(["manual", "policy"])
+});
+
+export const ApplyIntentOutcomeSchema = z.object({
+  intentId: z.string().min(1),
+  outcome: z.enum(["applied", "skipped", "failed", "stale", "unsupported"]),
+  message: z.string().min(1).optional(),
+  externalUri: z.string().min(1).optional(),
+  error: z.string().min(1).optional()
+});
+
+export const ApplyPlanSchema = z.object({
+  id: z.string().min(1),
+  proposalId: z.string().min(1),
+  approvalDecisionId: z.string().min(1),
+  selectedIntentIds: z.array(z.string().min(1)),
+  mode: z.enum(["preflight_then_per_intent", "atomic"]).default("preflight_then_per_intent"),
+  adapter: z.string().min(1).optional(),
+  adapterPlan: z.unknown().optional(),
+  outcomes: z.array(ApplyIntentOutcomeSchema).optional()
 });
 
 export const OpenTagEventSchema = z.object({
@@ -75,12 +327,22 @@ export const OpenTagEventSchema = z.object({
   metadata: z.record(z.unknown())
 });
 
+export const ResultArtifactSchema = z.object({
+  kind: ArtifactKindSchema.optional(),
+  title: z.string(),
+  uri: z.string(),
+  metadata: z.record(z.unknown()).optional()
+});
+
 export const OpenTagRunResultSchema = z.object({
   conclusion: z.enum(["success", "failure", "cancelled", "needs_human"]),
   summary: z.string(),
   changedFiles: z.array(z.string()).optional(),
   createdPullRequestUrl: z.string().url().optional(),
-  artifacts: z.array(z.object({ title: z.string(), uri: z.string() })).optional(),
+  artifacts: z.array(ResultArtifactSchema).optional(),
+  suggestedChanges: z.array(SuggestedChangesSnapshotSchema).optional(),
+  approvalDecision: ApprovalDecisionSchema.optional(),
+  applyPlan: ApplyPlanSchema.optional(),
   verification: z
     .array(
       z.object({
@@ -90,13 +352,19 @@ export const OpenTagRunResultSchema = z.object({
       })
     )
     .optional(),
-  nextAction: z.string().optional()
+  nextAction: NextActionSchema.optional()
 });
 
 export const OpenTagRunSchema = z.object({
   id: z.string().min(1),
   eventId: z.string().min(1),
   status: z.enum(["queued", "assigned", "running", "needs_approval", "succeeded", "failed", "cancelled"]),
+  thread: WorkThreadSchema.optional(),
+  parentRunId: z.string().min(1).optional(),
+  triggeredByAction: ActionHintSchema.optional(),
+  sourceProposalId: z.string().min(1).optional(),
+  sourceApplyPlanId: z.string().min(1).optional(),
+  contextPacket: ContextPacketSchema.optional(),
   assignedRunnerId: z.string().min(1).optional(),
   executor: z.string().min(1).optional(),
   createdAt: z.string().datetime(),
@@ -108,8 +376,36 @@ export type ActorIdentity = z.infer<typeof ActorIdentitySchema>;
 export type AgentTarget = z.infer<typeof AgentTargetSchema>;
 export type OpenTagCommand = z.infer<typeof OpenTagCommandSchema>;
 export type ContextPointer = z.infer<typeof ContextPointerSchema>;
+export type ContextPacketAssemblyStage = z.infer<typeof ContextPacketAssemblyStageSchema>;
+export type ContextPacket = z.infer<typeof ContextPacketSchema>;
 export type PermissionGrant = z.infer<typeof PermissionGrantSchema>;
+export type CapabilityClass = z.infer<typeof CapabilityClassSchema>;
+export type CapabilityContract = z.infer<typeof CapabilityContractSchema>;
+export type PolicyScope = z.infer<typeof PolicyScopeSchema>;
+export type PolicyEffect = z.infer<typeof PolicyEffectSchema>;
+export type PolicyRule = z.infer<typeof PolicyRuleSchema>;
+export type PolicyResolution = z.infer<typeof PolicyResolutionSchema>;
+export type AdapterMutationMapping = z.infer<typeof AdapterMutationMappingSchema>;
+export type SuccessMetricName = z.infer<typeof SuccessMetricNameSchema>;
 export type CallbackRoute = z.infer<typeof CallbackRouteSchema>;
+export type WorkItemReference = z.infer<typeof WorkItemReferenceSchema>;
+export type ConversationAnchor = z.infer<typeof ConversationAnchorSchema>;
+export type WorkThread = z.infer<typeof WorkThreadSchema>;
+export type RunEventVisibility = z.infer<typeof RunEventVisibilitySchema>;
+export type RunEventImportance = z.infer<typeof RunEventImportanceSchema>;
+export type RunEvent = z.infer<typeof RunEventSchema>;
+export type ArtifactKind = z.infer<typeof ArtifactKindSchema>;
+export type ActionHint = z.infer<typeof ActionHintSchema>;
+export type NextAction = z.infer<typeof NextActionSchema>;
+export type CanonicalMutationDomain = z.infer<typeof CanonicalMutationDomainSchema>;
+export type MutationIntent = z.infer<typeof MutationIntentSchema>;
+export type SuggestedChangesSnapshot = z.infer<typeof SuggestedChangesSnapshotSchema>;
+export type MutationIntentActionability = z.infer<typeof MutationIntentActionabilitySchema>;
+export type ProposalLineage = z.infer<typeof ProposalLineageSchema>;
+export type ApprovalDecision = z.infer<typeof ApprovalDecisionSchema>;
+export type ApplyIntentOutcome = z.infer<typeof ApplyIntentOutcomeSchema>;
+export type ApplyPlan = z.infer<typeof ApplyPlanSchema>;
+export type ResultArtifact = z.infer<typeof ResultArtifactSchema>;
 export type OpenTagEvent = z.infer<typeof OpenTagEventSchema>;
 export type OpenTagRun = z.infer<typeof OpenTagRunSchema>;
 export type OpenTagRunResult = z.infer<typeof OpenTagRunResultSchema>;

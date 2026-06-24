@@ -3,16 +3,17 @@ import { createCompositeCallbackSink, createGitHubCallbackSink, createSlackCallb
 
 describe("createGitHubCallbackSink", () => {
   it("posts GitHub callback messages to the callback URI", async () => {
-    const requests: { url: string; body: unknown; authorization: string | null }[] = [];
+    const requests: { url: string; method: string; body: unknown; authorization: string | null }[] = [];
     const sink = createGitHubCallbackSink({
       token: "ghs_test",
       fetchImpl: (async (url, init) => {
         requests.push({
           url: String(url),
+          method: init?.method ?? "GET",
           body: JSON.parse(String(init?.body)),
           authorization: new Headers(init?.headers).get("authorization")
         });
-        return Response.json({ id: 1 });
+        return Response.json({ id: 1, url: "https://api.github.com/repos/acme/demo/issues/comments/1" });
       }) as typeof fetch
     });
 
@@ -27,8 +28,134 @@ describe("createGitHubCallbackSink", () => {
     expect(requests).toEqual([
       {
         url: "https://api.github.com/repos/acme/demo/issues/1/comments",
+        method: "POST",
         authorization: "Bearer ghs_test",
         body: { body: "done" }
+      }
+    ]);
+  });
+
+  it("updates the same GitHub callback comment for a run", async () => {
+    const requests: { url: string; method: string; body: unknown; authorization: string | null }[] = [];
+    const sink = createGitHubCallbackSink({
+      token: "ghs_test",
+      fetchImpl: (async (url, init) => {
+        requests.push({
+          url: String(url),
+          method: init?.method ?? "GET",
+          body: JSON.parse(String(init?.body)),
+          authorization: new Headers(init?.headers).get("authorization")
+        });
+        return Response.json({ id: 123, url: "https://api.github.com/repos/acme/demo/issues/comments/123" });
+      }) as typeof fetch
+    });
+
+    await sink.deliver({
+      runId: "run_1",
+      kind: "acknowledgement",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "OpenTag picked this up."
+    });
+    await sink.deliver({
+      runId: "run_1",
+      kind: "progress",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "Still working"
+    });
+    await sink.deliver({
+      runId: "run_1",
+      kind: "final",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "Done"
+    });
+    await sink.deliver({
+      runId: "run_1",
+      kind: "progress",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "Starting again"
+    });
+
+    expect(requests).toEqual([
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/1/comments",
+        method: "POST",
+        authorization: "Bearer ghs_test",
+        body: { body: "OpenTag picked this up." }
+      },
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/comments/123",
+        method: "PATCH",
+        authorization: "Bearer ghs_test",
+        body: { body: "Still working" }
+      },
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/comments/123",
+        method: "PATCH",
+        authorization: "Bearer ghs_test",
+        body: { body: "Done" }
+      },
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/1/comments",
+        method: "POST",
+        authorization: "Bearer ghs_test",
+        body: { body: "Starting again" }
+      }
+    ]);
+  });
+
+  it("serializes concurrent GitHub callback deliveries for the same run", async () => {
+    const requests: { url: string; method: string; body: unknown }[] = [];
+    let resolveFirst: (() => void) | undefined;
+    const firstRequest = new Promise<void>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const sink = createGitHubCallbackSink({
+      token: "ghs_test",
+      fetchImpl: (async (url, init) => {
+        requests.push({
+          url: String(url),
+          method: init?.method ?? "GET",
+          body: JSON.parse(String(init?.body))
+        });
+        if (requests.length === 1) {
+          await firstRequest;
+          return Response.json({ id: 123, url: "https://api.github.com/repos/acme/demo/issues/comments/123" });
+        }
+        return Response.json({ id: 123, url: "https://api.github.com/repos/acme/demo/issues/comments/123" });
+      }) as typeof fetch
+    });
+
+    const first = sink.deliver({
+      runId: "run_1",
+      kind: "acknowledgement",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "Starting"
+    });
+    const second = sink.deliver({
+      runId: "run_1",
+      kind: "progress",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "Still working"
+    });
+    resolveFirst?.();
+    await Promise.all([first, second]);
+
+    expect(requests).toEqual([
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/1/comments",
+        method: "POST",
+        body: { body: "Starting" }
+      },
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/comments/123",
+        method: "PATCH",
+        body: { body: "Still working" }
       }
     ]);
   });

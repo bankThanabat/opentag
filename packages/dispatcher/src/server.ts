@@ -1,4 +1,21 @@
-import { OpenTagEventSchema, OpenTagRunResultSchema } from "@opentag/core";
+import {
+  AdapterMutationMappingSchema,
+  ActorIdentitySchema,
+  ActionHintSchema,
+  createAdapterMutationCompilerRegistry,
+  type OpenTagEvent,
+  OpenTagEventSchema,
+  OpenTagRunResultSchema,
+  PolicyRuleSchema,
+  RunEventImportanceSchema,
+  RunEventVisibilitySchema
+} from "@opentag/core";
+import {
+  applyGitHubIssueMutationOperation,
+  createGitHubIssueMutationCompiler,
+  type FetchLike as GitHubFetchLike
+} from "@opentag/github";
+import type { GitHubIssueMutationOperation } from "@opentag/github";
 import type { SlackBlock } from "@opentag/slack";
 import { createOpenTagRepository, migrateSchema } from "@opentag/store";
 import Database from "better-sqlite3";
@@ -29,6 +46,14 @@ const CreateSlackChannelBindingSchema = z.object({
   repo: z.string().min(1)
 });
 
+const UpsertPolicyRuleSchema = z.object({
+  rule: PolicyRuleSchema
+});
+
+const UpsertMutationMappingSchema = z.object({
+  mapping: AdapterMutationMappingSchema
+});
+
 const CreateRunSchema = z.object({
   runId: z.string().min(1),
   event: OpenTagEventSchema
@@ -38,10 +63,42 @@ const CompleteRunSchema = z.object({
   result: OpenTagRunResultSchema
 });
 
+const ApprovalDecisionInputSchema = z.object({
+  id: z.string().min(1).optional(),
+  approvedIntentIds: z.array(z.string().min(1)),
+  rejectedIntentIds: z.array(z.string().min(1)).optional(),
+  approvedBy: ActorIdentitySchema,
+  approvedAt: z.string().datetime().optional(),
+  scope: z.enum(["manual", "policy"]).default("manual")
+}).refine((value) => {
+  const rejected = new Set(value.rejectedIntentIds ?? []);
+  return value.approvedIntentIds.every((intentId) => !rejected.has(intentId));
+}, {
+  message: "approvedIntentIds and rejectedIntentIds must not overlap"
+});
+
+const ApplyPlanInputSchema = z.object({
+  id: z.string().min(1).optional(),
+  approvalDecisionId: z.string().min(1),
+  selectedIntentIds: z.array(z.string().min(1)).optional(),
+  adapter: z.string().min(1).optional(),
+  execute: z.boolean().optional()
+});
+
+const ChildRunInputSchema = z.object({
+  runId: z.string().min(1),
+  action: ActionHintSchema,
+  commandText: z.string().min(1).optional(),
+  sourceProposalId: z.string().min(1).optional(),
+  sourceApplyPlanId: z.string().min(1).optional()
+});
+
 const ProgressSchema = z.object({
   type: z.string().min(1).optional(),
   message: z.string().min(1),
-  at: z.string().datetime().optional()
+  at: z.string().datetime().optional(),
+  visibility: RunEventVisibilitySchema.optional(),
+  importance: RunEventImportanceSchema.optional()
 });
 
 function repoKeyFromEvent(event: z.infer<typeof OpenTagEventSchema>): { provider: string; owner: string; repo: string } | null {
@@ -64,6 +121,36 @@ function actorIsAllowed(event: z.infer<typeof OpenTagEventSchema>, allowedActors
   return allowedActors.includes(event.actor.handle ?? "") || allowedActors.includes(event.actor.providerUserId);
 }
 
+function childEventFromParent(input: {
+  parentEvent: OpenTagEvent;
+  childRunId: string;
+  commandText?: string;
+  actionKind: string;
+  receivedAt: string;
+}): OpenTagEvent {
+  return {
+    ...input.parentEvent,
+    id: `evt_${input.childRunId}`,
+    sourceEventId: `${input.parentEvent.sourceEventId}:${input.childRunId}`,
+    receivedAt: input.receivedAt,
+    command: {
+      rawText: input.commandText ?? `Execute next action: ${input.actionKind}`,
+      intent: "run",
+      args: {
+        parentSourceEventId: input.parentEvent.sourceEventId,
+        actionKind: input.actionKind
+      }
+    }
+  };
+}
+
+function mappingsFromAdapterPlan(adapterPlan: unknown) {
+  if (!adapterPlan || typeof adapterPlan !== "object" || Array.isArray(adapterPlan)) return [];
+  const mappings = (adapterPlan as { mappings?: unknown }).mappings;
+  if (!Array.isArray(mappings)) return [];
+  return mappings.map((mapping) => AdapterMutationMappingSchema.parse(mapping));
+}
+
 export type CallbackMessage = {
   runId: string;
   kind: "acknowledgement" | "progress" | "final";
@@ -78,6 +165,11 @@ export type CallbackMessage = {
 
 export type CallbackSink = {
   deliver(message: CallbackMessage): Promise<void>;
+};
+
+export type GitHubApplyOptions = {
+  token: string;
+  fetchImpl?: GitHubFetchLike;
 };
 
 const noopCallbackSink: CallbackSink = {
@@ -95,7 +187,10 @@ async function deliverAndAudit(input: {
   await input.repo.appendRunEvent({
     runId: input.message.runId,
     type: `callback.${input.message.kind}.delivered`,
-    payload: input.message
+    payload: input.message,
+    visibility: "human",
+    importance: input.message.kind === "final" ? "high" : "normal",
+    message: input.message.body
   });
 }
 
@@ -104,7 +199,13 @@ function isAuthorized(request: Request, pairingToken: string | undefined): boole
   return request.headers.get("authorization") === `Bearer ${pairingToken}`;
 }
 
-export function createDispatcherApp(input: { databasePath: string; callbackSink?: CallbackSink; pairingToken?: string; presentation?: CallbackPresentation }) {
+export function createDispatcherApp(input: {
+  databasePath: string;
+  callbackSink?: CallbackSink;
+  pairingToken?: string;
+  presentation?: CallbackPresentation;
+  githubApply?: GitHubApplyOptions;
+}) {
   const sqlite = new Database(input.databasePath);
   migrateSchema(sqlite);
   const repo = createOpenTagRepository(drizzle(sqlite));
@@ -149,6 +250,62 @@ export function createDispatcherApp(input: { databasePath: string; callbackSink?
     });
     if (!binding) return c.json({ error: "repo_binding_not_found" }, 404);
     return c.json({ binding });
+  });
+
+  app.post("/v1/repo-bindings/:provider/:owner/:repo/policy-rules", async (c) => {
+    const parsed = UpsertPolicyRuleSchema.parse(await c.req.json());
+    const rule = await repo.upsertRepoPolicyRule({
+      provider: c.req.param("provider"),
+      owner: c.req.param("owner"),
+      repo: c.req.param("repo"),
+      rule: parsed.rule
+    });
+    return c.json({ rule }, 201);
+  });
+
+  app.get("/v1/repo-bindings/:provider/:owner/:repo/policy-rules", async (c) => {
+    const rules = await repo.listRepoPolicyRules({
+      provider: c.req.param("provider"),
+      owner: c.req.param("owner"),
+      repo: c.req.param("repo")
+    });
+    return c.json({ rules });
+  });
+
+  app.post("/v1/repo-bindings/:provider/:owner/:repo/mutation-mappings", async (c) => {
+    const parsed = UpsertMutationMappingSchema.parse(await c.req.json());
+    const mapping = await repo.upsertRepoMutationMapping({
+      provider: c.req.param("provider"),
+      owner: c.req.param("owner"),
+      repo: c.req.param("repo"),
+      mapping: parsed.mapping
+    });
+    return c.json({ mapping }, 201);
+  });
+
+  app.get("/v1/repo-bindings/:provider/:owner/:repo/mutation-mappings", async (c) => {
+    const mappings = await repo.listRepoMutationMappings({
+      provider: c.req.param("provider"),
+      owner: c.req.param("owner"),
+      repo: c.req.param("repo")
+    });
+    return c.json({ mappings });
+  });
+
+  app.get("/v1/repo-bindings/:provider/:owner/:repo/metrics", async (c) => {
+    const metrics = await repo.getRepoMetrics({
+      provider: c.req.param("provider"),
+      owner: c.req.param("owner"),
+      repo: c.req.param("repo")
+    });
+    return c.json({ metrics });
+  });
+
+  app.get("/v1/work-thread-metrics", async (c) => {
+    const threadId = c.req.query("threadId");
+    if (!threadId) return c.json({ error: "thread_id_required" }, 422);
+    const metrics = await repo.getWorkThreadMetrics({ threadId });
+    return c.json({ metrics });
   });
 
   app.post("/v1/slack-channel-bindings", async (c) => {
@@ -225,7 +382,9 @@ export function createDispatcherApp(input: { databasePath: string; callbackSink?
       runId,
       message: body.message,
       ...(body.type ? { type: body.type } : {}),
-      ...(body.at ? { at: body.at } : {})
+      ...(body.at ? { at: body.at } : {}),
+      ...(body.visibility ? { visibility: body.visibility } : {}),
+      ...(body.importance ? { importance: body.importance } : {})
     });
     if (presentation.shouldDeliverProgress(stored.event.callback.provider)) {
       await deliverAndAudit({
@@ -271,10 +430,175 @@ export function createDispatcherApp(input: { databasePath: string; callbackSink?
     return c.json({ ok: true });
   });
 
+  app.get("/v1/proposals/:proposalId", async (c) => {
+    const proposal = await repo.getSuggestedChanges({ proposalId: c.req.param("proposalId") });
+    if (!proposal) return c.json({ error: "proposal_not_found" }, 404);
+    return c.json(proposal);
+  });
+
+  app.get("/v1/proposals/:proposalId/lineage", async (c) => {
+    const lineage = await repo.getProposalLineage({ proposalId: c.req.param("proposalId") });
+    if (!lineage) return c.json({ error: "proposal_not_found" }, 404);
+    return c.json({ lineage });
+  });
+
+  app.get("/v1/proposals/:proposalId/current-intents", async (c) => {
+    const intents = await repo.listCurrentMutationIntents({ proposalId: c.req.param("proposalId") });
+    if (!intents) return c.json({ error: "proposal_not_found" }, 404);
+    return c.json({ intents });
+  });
+
+  app.post("/v1/proposals/:proposalId/approvals", async (c) => {
+    const proposalId = c.req.param("proposalId");
+    const parsedBody = ApprovalDecisionInputSchema.safeParse(await c.req.json());
+    if (!parsedBody.success) return c.json({ error: "invalid_approval_decision" }, 400);
+    const body = parsedBody.data;
+    const decision = await repo.recordApprovalDecision({
+      id: body.id ?? `approval_${proposalId}_${Date.now()}`,
+      proposalId,
+      approvedIntentIds: body.approvedIntentIds,
+      ...(body.rejectedIntentIds?.length ? { rejectedIntentIds: body.rejectedIntentIds } : {}),
+      approvedBy: body.approvedBy,
+      approvedAt: body.approvedAt ?? new Date().toISOString(),
+      scope: body.scope
+    });
+    if (!decision) return c.json({ error: "proposal_not_found" }, 404);
+    return c.json({ decision }, 201);
+  });
+
+  app.get("/v1/approvals/:approvalDecisionId", async (c) => {
+    const decision = await repo.getApprovalDecision({ id: c.req.param("approvalDecisionId") });
+    if (!decision) return c.json({ error: "approval_decision_not_found" }, 404);
+    return c.json({ decision });
+  });
+
+  app.post("/v1/proposals/:proposalId/apply-plans", async (c) => {
+    const proposalId = c.req.param("proposalId");
+    const body = ApplyPlanInputSchema.parse(await c.req.json());
+    let executableTarget:
+      | {
+          proposal: NonNullable<Awaited<ReturnType<typeof repo.getSuggestedChanges>>>;
+          owner: string;
+          repoName: string;
+          issueNumber: number;
+        }
+      | undefined;
+
+    if (body.execute) {
+      if (body.adapter !== "github") {
+        return c.json({ error: "apply_execution_adapter_not_supported" }, 422);
+      }
+      if (!input.githubApply) {
+        return c.json({ error: "github_apply_not_configured" }, 422);
+      }
+      const proposal = await repo.getSuggestedChanges({ proposalId });
+      if (!proposal) return c.json({ error: "proposal_not_found" }, 404);
+      const stored = await repo.getRun({ runId: proposal.runId });
+      if (!stored) return c.json({ error: "run_not_found" }, 404);
+      const owner = stored.event.metadata["owner"];
+      const repoName = stored.event.metadata["repo"];
+      const issueNumber = stored.event.metadata["issueNumber"];
+      if (typeof owner !== "string" || typeof repoName !== "string" || typeof issueNumber !== "number") {
+        return c.json({ error: "github_issue_target_missing" }, 422);
+      }
+      executableTarget = { proposal, owner, repoName, issueNumber };
+    }
+
+    const plan = await repo.createApplyPlan({
+      id: body.id ?? `apply_${proposalId}_${Date.now()}`,
+      proposalId,
+      approvalDecisionId: body.approvalDecisionId,
+      ...(body.selectedIntentIds !== undefined ? { selectedIntentIds: body.selectedIntentIds } : {}),
+      ...(body.adapter ? { adapter: body.adapter } : {})
+    });
+    if (!plan) return c.json({ error: "proposal_or_approval_not_found" }, 404);
+    if (body.execute && executableTarget) {
+      const githubApply = input.githubApply;
+      if (!githubApply) {
+        return c.json({ error: "github_apply_not_configured" }, 422);
+      }
+      const preflightOutcomeByIntentId = new Map((plan.outcomes ?? []).map((outcome) => [outcome.intentId, outcome]));
+      const executableIntents = executableTarget.proposal.snapshot.intents.filter((intent) => {
+        const outcome = preflightOutcomeByIntentId.get(intent.intentId);
+        return outcome?.outcome === "skipped" && outcome.message?.startsWith("Preflight passed");
+      });
+      const target = {
+        token: githubApply.token,
+        owner: executableTarget.owner,
+        repo: executableTarget.repoName,
+        issueNumber: executableTarget.issueNumber
+      };
+      const executedOutcomes = [];
+      const compilerRegistry = createAdapterMutationCompilerRegistry([
+        createGitHubIssueMutationCompiler({ mappings: mappingsFromAdapterPlan(plan.adapterPlan) })
+      ]);
+      for (const compilation of compilerRegistry.compile("github", executableIntents)) {
+        if (!compilation.ok) {
+          executedOutcomes.push(compilation.outcome);
+          continue;
+        }
+        executedOutcomes.push(
+          await applyGitHubIssueMutationOperation({
+            target,
+            operation: compilation.operation as GitHubIssueMutationOperation,
+            ...(githubApply.fetchImpl ? { fetchImpl: githubApply.fetchImpl } : {})
+          })
+        );
+      }
+      const executedOutcomeByIntentId = new Map(executedOutcomes.map((outcome) => [outcome.intentId, outcome]));
+      const mergedOutcomes = (plan.outcomes ?? []).map((outcome) => executedOutcomeByIntentId.get(outcome.intentId) ?? outcome);
+      const executedPlan = await repo.updateApplyPlanOutcomes({
+        id: plan.id,
+        outcomes: mergedOutcomes,
+        externalWritesExecuted: true
+      });
+      return c.json({ plan: executedPlan ?? plan }, 201);
+    }
+    return c.json({ plan }, 201);
+  });
+
+  app.get("/v1/apply-plans/:applyPlanId", async (c) => {
+    const plan = await repo.getApplyPlan({ id: c.req.param("applyPlanId") });
+    if (!plan) return c.json({ error: "apply_plan_not_found" }, 404);
+    return c.json({ plan });
+  });
+
+  app.post("/v1/runs/:runId/child-runs", async (c) => {
+    const parentRunId = c.req.param("runId");
+    const body = ChildRunInputSchema.parse(await c.req.json());
+    const parent = await repo.getRun({ runId: parentRunId });
+    if (!parent) return c.json({ error: "parent_run_not_found" }, 404);
+    const receivedAt = new Date().toISOString();
+    const sourceProposalId = body.sourceProposalId ?? body.action.targetId;
+    const run = await repo.createRun({
+      id: body.runId,
+      event: childEventFromParent({
+        parentEvent: parent.event,
+        childRunId: body.runId,
+        ...(body.commandText ? { commandText: body.commandText } : {}),
+        actionKind: body.action.kind,
+        receivedAt
+      }),
+      parentRunId,
+      triggeredByAction: body.action,
+      ...(sourceProposalId ? { sourceProposalId } : {}),
+      ...(body.sourceApplyPlanId ? { sourceApplyPlanId: body.sourceApplyPlanId } : {})
+    });
+    return c.json({ run }, 201);
+  });
+
   app.get("/v1/runs/:runId", async (c) => {
     const stored = await repo.getRun({ runId: c.req.param("runId") });
     if (!stored) return c.json({ error: "run_not_found" }, 404);
     return c.json(stored);
+  });
+
+  app.get("/v1/runs/:runId/metrics", async (c) => {
+    const runId = c.req.param("runId");
+    const stored = await repo.getRun({ runId });
+    if (!stored) return c.json({ error: "run_not_found" }, 404);
+    const metrics = await repo.getRunMetrics({ runId });
+    return c.json({ metrics });
   });
 
   app.get("/v1/runs/:runId/events", async (c) => {

@@ -22,5 +22,9 @@ describe("echo executor", () => {
     expect(events).toContain("executor.started");
     expect(result.conclusion).toBe("success");
     expect(result.summary).toContain("fix this");
+    expect(result.nextAction).toEqual({
+      summary: "No external state change is suggested for the echo executor result.",
+      hint: { kind: "none" }
+    });
   });
 });

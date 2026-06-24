@@ -8,6 +8,8 @@ Use this document when you want to prove that OpenTag works beyond local unit te
 - real Slack Events API delivery
 - real dispatcher and daemon execution
 - real callback messages posted back to the source thread
+- real local Claude Code execution
+- protocol metrics that show callback noise and artifact flow
 
 ## Goal
 
@@ -17,6 +19,7 @@ A smoke test is complete when all of these are true:
 2. The dispatcher creates a run and records audit events.
 3. The local daemon claims the run and executes the configured executor.
 4. The final result is posted back to the original GitHub thread or Slack thread.
+5. Metrics show low human callback noise relative to audit events.
 
 ## Shared Local Prerequisites
 
@@ -65,9 +68,66 @@ Create a local runner config that binds the repository you want to test:
 }
 ```
 
-Start with `"defaultExecutor": "echo"` until the end-to-end callback loop is proven. Switch to `"codex"` only after GitHub or Slack replies are working.
+Start with `"defaultExecutor": "echo"` until the end-to-end callback loop is proven. Switch to `"codex"` or `"claude-code"` only after GitHub or Slack replies are working.
+
+For Claude Code, set the repository binding to:
+
+```json
+"defaultExecutor": "claude-code"
+```
+
+Optional daemon-level Claude Code settings can be added to the same config:
+
+```json
+"claudeCode": {
+  "command": "claude",
+  "permissionMode": "acceptEdits"
+}
+```
+
+You can also configure these through environment variables:
+
+```bash
+OPENTAG_CLAUDE_COMMAND=claude
+OPENTAG_CLAUDE_MODEL=sonnet
+OPENTAG_CLAUDE_PERMISSION_MODE=acceptEdits
+```
+
+`OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=true` is supported for explicitly sandboxed environments, but it is not enabled by default.
 
 ## GitHub Smoke Test
+
+### GitHub CLI-Assisted Smoke Test
+
+The fastest real GitHub test does not require a GitHub App webhook. It uses the active `gh` CLI login to create a GitHub-shaped run directly in the dispatcher, then lets `opentagd` execute locally and callback to a real issue.
+
+Use an existing issue:
+
+```bash
+OPENTAG_GH_REPO=amplifthq/opentag-test \
+OPENTAG_WORKSPACE_PATH=/absolute/path/to/clean/opentag-test \
+OPENTAG_GH_TEST_ISSUE=1 \
+scripts/dev/run-gh-claude-local-test.sh
+```
+
+Or create a temporary issue:
+
+```bash
+OPENTAG_GH_REPO=amplifthq/opentag-test \
+OPENTAG_WORKSPACE_PATH=/absolute/path/to/clean/opentag-test \
+OPENTAG_GH_CREATE_ISSUE=true \
+scripts/dev/run-gh-claude-local-test.sh
+```
+
+Set `OPENTAG_GH_CREATE_PR=true` when you want the daemon to commit executor-produced file changes, push the run branch, and create a pull request. Without that flag, the smoke test validates callback delivery and local execution without opening a PR.
+
+This path has been validated with:
+
+```text
+GitHub issue -> dispatcher -> opentagd -> local Claude Code -> commit branch -> push -> PR -> GitHub callback
+```
+
+GitHub callbacks update one comment per run in place. The first callback creates the run comment, and later progress/final callbacks patch that same comment instead of creating a new issue comment for every state change.
 
 ### GitHub App Setup
 
@@ -167,6 +227,8 @@ Expected result:
   - progress
   - final result
 
+For GitHub App webhook testing, keep `OPENTAG_DISPATCHER_OWNS_CALLBACKS=true` on the Probot app so the dispatcher owns the run comment lifecycle.
+
 ### GitHub Failure Modes We Hit
 
 - **Probot setup mode**
@@ -178,7 +240,35 @@ Expected result:
 - **App installed but repo missing**
   The App installation must explicitly include the repository you are testing.
 
+- **PR push failed because no commit existed**
+  Local executors leave file changes in the run branch. `opentagd` now stages and commits changed files before pushing a run branch for PR creation.
+
 ## Slack Smoke Test
+
+### Slack API-Assisted Smoke Test
+
+The fastest real Slack test does not require a public Events API tunnel. It uses the configured Slack bot token to post a seed message in the bound channel, then creates a Slack-shaped OpenTag run against that thread.
+
+```bash
+OPENTAG_ENV_FILE=/absolute/path/to/.env.slack-test \
+scripts/dev/run-slack-claude-local-test.sh
+```
+
+By default this script reads `OPENTAG_CONFIG_PATH` from the env file, creates a temporary clean checkout for the configured repo, executes local Claude Code, and prints the run metrics plus Slack thread replies.
+
+This path has been validated with:
+
+```text
+Slack thread -> dispatcher -> opentagd -> local Claude Code -> Slack final callback + metrics
+```
+
+Expected Slack thread shape:
+
+- original user/bot seed message
+- OpenTag acknowledgement
+- OpenTag final result
+
+Routine progress stays audit-only by default, so it should not produce additional Slack thread replies.
 
 ### Slack App Setup
 
@@ -267,8 +357,9 @@ Expected result:
 - daemon claims and executes the run
 - the Slack thread receives:
   - acknowledgement
-  - progress
   - final result
+
+Routine progress should be visible in dispatcher audit events, not as Slack replies.
 
 ### Slack Failure Modes We Hit
 
@@ -286,6 +377,28 @@ Expected result:
 
 - **Replies show up in the thread, not the main channel stream**
   Slack callback delivery uses `thread_ts`, so the most reliable place to check for bot replies is the message thread you mentioned the bot in.
+
+## Protocol Metrics Checks
+
+Every real smoke test should inspect run metrics:
+
+```bash
+curl -H "authorization: Bearer $OPENTAG_PAIRING_TOKEN" \
+  http://localhost:3031/v1/runs/<run-id>/metrics
+```
+
+Important fields:
+
+- `humanCallbackCount`
+- `auditEventCount`
+- `threadNoiseRatio`
+- `suggestedChangesCount`
+- `approvalDecisionCount`
+- `applyPlanCount`
+- `childRunCount`
+- `applyOutcomeCounts`
+
+For Slack, `humanCallbackCount` should normally be `2` for a completed run: acknowledgement plus final. A low `threadNoiseRatio` means OpenTag is recording detail in audit without flooding the human thread.
 
 ## Debugging Order
 
@@ -309,3 +422,22 @@ When something is broken, debug in this order:
 ## Recommendation
 
 For real integration work, keep two separate public tunnels or be deliberate about switching one tunnel between GitHub and Slack. Reusing the same public hostname across both ports is possible, but it is an easy way to lose half an hour to the wrong endpoint.
+
+## Combined GitHub + Slack + Claude Code Stack
+
+After the individual GitHub and Slack paths work, you can run both ingress services against one local Claude Code daemon:
+
+```bash
+OPENTAG_CONFIG_PATH=/absolute/path/to/opentag.real.json \
+OPENTAG_GITHUB_TOKEN=<github-token> \
+OPENTAG_SLACK_BOT_TOKEN=<xoxb-token> \
+SLACK_SIGNING_SECRET=<signing-secret> \
+APP_ID=<github-app-id> \
+WEBHOOK_SECRET=<github-webhook-secret> \
+PRIVATE_KEY_PATH=/absolute/path/to/github-app.private-key.pem \
+scripts/dev/start-github-slack-claude-test.sh
+```
+
+The config file should bind the target repository and Slack channel, and the repository binding should use `"defaultExecutor": "claude-code"`.
+
+Use `scripts/dev/run-gh-claude-local-test.sh` and `scripts/dev/run-slack-claude-local-test.sh` first. They are easier to debug because they do not require public webhook tunnels. Use the combined stack once both assisted paths work.
