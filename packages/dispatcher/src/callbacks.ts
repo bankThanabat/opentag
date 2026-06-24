@@ -63,6 +63,9 @@ export function createGitHubCallbackSink(input: { token?: string; fetchImpl?: Fe
           commentUriByKey.set(statusKey, commentUri);
         }
       }
+      if (message.kind === "final") {
+        commentUriByKey.delete(statusKey);
+      }
     }
   };
 }

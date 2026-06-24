@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyGitHubIssueMutationIntent, compileGitHubIssueMutationIntent } from "../src/apply.js";
+import { applyGitHubIssueMutationIntent, applyGitHubIssueMutationOperation, compileGitHubIssueMutationIntent } from "../src/apply.js";
 
 describe("GitHub apply helpers", () => {
   it("compiles semantic mutation intents into GitHub issue operations", () => {
@@ -66,9 +66,10 @@ describe("GitHub apply helpers", () => {
       ok: true,
       intentId: "intent_status",
       operation: {
-        kind: "add_label",
+        kind: "replace_mapped_label",
         intentId: "intent_status",
-        label: "status/blocked"
+        label: "status/blocked",
+        removeLabels: []
       }
     });
 
@@ -88,7 +89,7 @@ describe("GitHub apply helpers", () => {
               adapter: "github",
               domain: "priority",
               strategy: "label",
-              values: { P1: "priority/P1" }
+              values: { P0: "priority/P0", P1: "priority/P1" }
             }
           ]
         }
@@ -97,11 +98,78 @@ describe("GitHub apply helpers", () => {
       ok: true,
       intentId: "intent_priority",
       operation: {
-        kind: "add_label",
+        kind: "replace_mapped_label",
         intentId: "intent_priority",
-        label: "priority/P1"
+        label: "priority/P1",
+        removeLabels: ["priority/P0"]
       }
     });
+  });
+
+  it("applies mapped label transitions by removing conflicting mapped labels first", async () => {
+    const requests: Array<{ url: string; method: string; body?: unknown; authorization: string | null }> = [];
+    const fetchImpl = (async (url, init) => {
+      requests.push({
+        url: String(url),
+        method: init?.method ?? "GET",
+        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
+        authorization: new Headers(init?.headers).get("authorization")
+      });
+      if (init?.method === "DELETE") {
+        return new Response("", { status: 404 });
+      }
+      return Response.json({});
+    }) as typeof fetch;
+
+    await expect(
+      applyGitHubIssueMutationIntent({
+        target: { token: "ghs_test", owner: "acme", repo: "demo", issueNumber: 7 },
+        fetchImpl,
+        intent: {
+          intentId: "intent_priority",
+          domain: "priority",
+          action: "set_priority",
+          summary: "Set P1.",
+          params: { priority: "P1" }
+        }
+      })
+    ).resolves.toMatchObject({ intentId: "intent_priority", outcome: "unsupported" });
+
+    requests.length = 0;
+    const compiled = compileGitHubIssueMutationIntent(
+      {
+        intentId: "intent_priority",
+        domain: "priority",
+        action: "set_priority",
+        summary: "Set P1.",
+        params: { priority: "P1" }
+      },
+      {
+        mappings: [{ id: "priority", adapter: "github", domain: "priority", strategy: "label", values: { P0: "priority/P0", P1: "priority/P1" } }]
+      }
+    );
+    if (!compiled.ok) throw new Error("expected compilation success");
+    await expect(
+      applyGitHubIssueMutationOperation({
+        target: { token: "ghs_test", owner: "acme", repo: "demo", issueNumber: 7 },
+        fetchImpl,
+        operation: compiled.operation
+      })
+    ).resolves.toMatchObject({ intentId: "intent_priority", outcome: "applied" });
+
+    expect(requests).toEqual([
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/7/labels/priority%2FP0",
+        method: "DELETE",
+        authorization: "Bearer ghs_test"
+      },
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/7/labels",
+        method: "POST",
+        authorization: "Bearer ghs_test",
+        body: { labels: ["priority/P1"] }
+      }
+    ]);
   });
 
   it("applies label mutation intents through GitHub issue APIs", async () => {

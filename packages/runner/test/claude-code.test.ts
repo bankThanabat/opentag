@@ -112,4 +112,24 @@ describe("Claude Code executor", () => {
       })
     ).resolves.toEqual({ ready: false, reason: "Workspace has uncommitted changes; refusing to run Claude Code executor." });
   });
+
+  it("returns not ready when the Claude Code CLI is missing", async () => {
+    const runner: CommandRunner = {
+      async run(command) {
+        if (command === "claude") {
+          throw new Error("spawn claude ENOENT");
+        }
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+    };
+
+    await expect(
+      createClaudeCodeExecutor({ runner }).canRun({
+        runId: "run_1",
+        workspacePath: "/tmp/demo",
+        command: { rawText: "fix this", intent: "fix", args: {} },
+        context: []
+      })
+    ).resolves.toEqual({ ready: false, reason: "Claude Code CLI is not available: spawn claude ENOENT" });
+  });
 });

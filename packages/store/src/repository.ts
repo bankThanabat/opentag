@@ -514,6 +514,7 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       const triggeredByAction = input.triggeredByAction ? ActionHintSchema.parse(input.triggeredByAction) : undefined;
       const createdAt = nowIso();
       const protocolFields = protocolRunFieldsFromEvent(event, createdAt);
+      const repoKey = repoKeyFromEvent(event);
       await db.insert(runs).values({
         id: input.id,
         eventId: event.id,
@@ -523,6 +524,10 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         triggeredByActionJson: triggeredByAction ? JSON.stringify(triggeredByAction) : null,
         sourceProposalId: input.sourceProposalId ?? null,
         sourceApplyPlanId: input.sourceApplyPlanId ?? null,
+        repoProvider: repoKey?.provider ?? null,
+        repoOwner: repoKey?.owner ?? null,
+        repoName: repoKey?.repo ?? null,
+        workThreadId: protocolFields.thread?.id ?? null,
         createdAt,
         updatedAt: createdAt
       });
@@ -1157,14 +1162,12 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
     },
 
     async getRepoMetrics(input: { provider: string; owner: string; repo: string }): Promise<OpenTagAggregateMetrics> {
-      const runRows = await db.select().from(runs).orderBy(asc(runs.createdAt));
-      const matchingRunIds = runRows
-        .filter((row) => {
-          const event = OpenTagEventSchema.parse(JSON.parse(row.eventJson));
-          const key = repoKeyFromEvent(event);
-          return key?.provider === input.provider && key.owner === input.owner && key.repo === input.repo;
-        })
-        .map((row) => row.id);
+      const runRows = await db
+        .select()
+        .from(runs)
+        .where(and(eq(runs.repoProvider, input.provider), eq(runs.repoOwner, input.owner), eq(runs.repoName, input.repo)))
+        .orderBy(asc(runs.createdAt));
+      const matchingRunIds = runRows.map((row) => row.id);
       const runMetrics = [];
       for (const runId of matchingRunIds) {
         const rows = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.id));
@@ -1192,13 +1195,8 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
     },
 
     async getWorkThreadMetrics(input: { threadId: string }): Promise<OpenTagAggregateMetrics> {
-      const runRows = await db.select().from(runs).orderBy(asc(runs.createdAt));
-      const matchingRunIds = runRows
-        .filter((row) => {
-          const event = OpenTagEventSchema.parse(JSON.parse(row.eventJson));
-          return protocolRunFieldsFromEvent(event, row.createdAt).thread?.id === input.threadId;
-        })
-        .map((row) => row.id);
+      const runRows = await db.select().from(runs).where(eq(runs.workThreadId, input.threadId)).orderBy(asc(runs.createdAt));
+      const matchingRunIds = runRows.map((row) => row.id);
       const runMetrics = [];
       for (const runId of matchingRunIds) {
         const rows = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.id));

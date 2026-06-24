@@ -44,9 +44,13 @@ export function createClaudeCodeExecutor(options: ClaudeCodeExecutorOptions = {}
     id: "claude-code",
     displayName: "Claude Code Executor",
     async canRun(input) {
-      const claudeVersion = await runner.run(claudeCommand, ["--version"], { cwd: input.workspacePath });
-      if (claudeVersion.exitCode !== 0) {
-        return { ready: false, reason: `Claude Code CLI is not available: ${claudeVersion.stderr || claudeVersion.stdout}` };
+      try {
+        const claudeVersion = await runner.run(claudeCommand, ["--version"], { cwd: input.workspacePath });
+        if (claudeVersion.exitCode !== 0) {
+          return { ready: false, reason: `Claude Code CLI is not available: ${claudeVersion.stderr || claudeVersion.stdout}` };
+        }
+      } catch (error) {
+        return { ready: false, reason: `Claude Code CLI is not available: ${error instanceof Error ? error.message : String(error)}` };
       }
       const gitStatus = await runner.run("git", ["status", "--porcelain"], { cwd: input.workspacePath });
       if (gitStatus.exitCode !== 0) {

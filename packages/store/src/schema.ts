@@ -15,6 +15,10 @@ export const runs = sqliteTable(
     triggeredByActionJson: text("triggered_by_action_json"),
     sourceProposalId: text("source_proposal_id"),
     sourceApplyPlanId: text("source_apply_plan_id"),
+    repoProvider: text("repo_provider"),
+    repoOwner: text("repo_owner"),
+    repoName: text("repo_name"),
+    workThreadId: text("work_thread_id"),
     leasedAt: text("leased_at"),
     leaseExpiresAt: text("lease_expires_at"),
     heartbeatAt: text("heartbeat_at"),
@@ -23,7 +27,9 @@ export const runs = sqliteTable(
   },
   (table) => ({
     statusIdx: index("runs_status_idx").on(table.status),
-    runnerIdx: index("runs_runner_idx").on(table.assignedRunnerId)
+    runnerIdx: index("runs_runner_idx").on(table.assignedRunnerId),
+    repoIdx: index("runs_repo_idx").on(table.repoProvider, table.repoOwner, table.repoName),
+    workThreadIdx: index("runs_work_thread_idx").on(table.workThreadId)
   })
 );
 
@@ -132,6 +138,10 @@ export function migrateSchema(sqlite: Database.Database): void {
       triggered_by_action_json TEXT,
       source_proposal_id TEXT,
       source_apply_plan_id TEXT,
+      repo_provider TEXT,
+      repo_owner TEXT,
+      repo_name TEXT,
+      work_thread_id TEXT,
       leased_at TEXT,
       lease_expires_at TEXT,
       heartbeat_at TEXT,
@@ -140,6 +150,8 @@ export function migrateSchema(sqlite: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS runs_status_idx ON runs(status);
     CREATE INDEX IF NOT EXISTS runs_runner_idx ON runs(assigned_runner_id);
+    CREATE INDEX IF NOT EXISTS runs_repo_idx ON runs(repo_provider, repo_owner, repo_name);
+    CREATE INDEX IF NOT EXISTS runs_work_thread_idx ON runs(work_thread_id);
     CREATE TABLE IF NOT EXISTS run_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL,
@@ -246,6 +258,20 @@ export function migrateSchema(sqlite: Database.Database): void {
   if (!runColumnNames.has("source_apply_plan_id")) {
     sqlite.exec("ALTER TABLE runs ADD COLUMN source_apply_plan_id TEXT");
   }
+  if (!runColumnNames.has("repo_provider")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN repo_provider TEXT");
+  }
+  if (!runColumnNames.has("repo_owner")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN repo_owner TEXT");
+  }
+  if (!runColumnNames.has("repo_name")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN repo_name TEXT");
+  }
+  if (!runColumnNames.has("work_thread_id")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN work_thread_id TEXT");
+  }
+  sqlite.exec("CREATE INDEX IF NOT EXISTS runs_repo_idx ON runs(repo_provider, repo_owner, repo_name)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS runs_work_thread_idx ON runs(work_thread_id)");
   const runEventColumns = sqlite.prepare("PRAGMA table_info(run_events)").all() as { name: string }[];
   const runEventColumnNames = new Set(runEventColumns.map((column) => column.name));
   if (!runEventColumnNames.has("visibility")) {

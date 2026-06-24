@@ -23,7 +23,8 @@ export async function maybeCreatePullRequest(input: {
   if (!input.options.githubToken) return input.result;
   if (input.event.source !== "github") return input.result;
   if (!hasPermission(input.event, "pr:create")) return input.result;
-  if (!input.result.changedFiles?.length) return input.result;
+  const changedFiles = input.result.changedFiles ?? [];
+  if (changedFiles.length === 0) return input.result;
 
   const owner = input.event.metadata["owner"];
   const repo = input.event.metadata["repo"];
@@ -34,7 +35,7 @@ export async function maybeCreatePullRequest(input: {
   await commitChangedFiles({
     runner,
     workspacePath: input.binding.checkoutPath,
-    files: input.result.changedFiles,
+    files: changedFiles,
     message: `OpenTag run ${input.run.id}`
   });
   await pushBranch({

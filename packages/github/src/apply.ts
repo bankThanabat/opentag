@@ -20,6 +20,12 @@ export type GitHubIssueMutationOperation =
       label: string;
     }
   | {
+      kind: "replace_mapped_label";
+      intentId: string;
+      label: string;
+      removeLabels: string[];
+    }
+  | {
       kind: "set_labels";
       intentId: string;
       labels: string[];
@@ -81,13 +87,18 @@ function mappedValueFromIntent(intent: MutationIntent): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function labelMappingForIntent(input: { intent: MutationIntent; mappings: AdapterMutationMapping[] }): string | undefined {
+function labelMappingForIntent(input: { intent: MutationIntent; mappings: AdapterMutationMapping[] }): { label: string; removeLabels: string[] } | undefined {
   const semanticValue = mappedValueFromIntent(input.intent);
   if (!semanticValue) return undefined;
   const mapping = input.mappings.find(
     (candidate) => candidate.adapter === "github" && candidate.domain === input.intent.domain && candidate.strategy === "label"
   );
-  return mapping?.values[semanticValue];
+  const label = mapping?.values[semanticValue];
+  if (!label || !mapping) return undefined;
+  return {
+    label,
+    removeLabels: Object.values(mapping.values).filter((mappedLabel) => mappedLabel !== label)
+  };
 }
 
 async function githubJson(input: {
@@ -96,6 +107,7 @@ async function githubJson(input: {
   method: "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   body?: unknown;
+  okStatuses?: number[];
 }): Promise<string | undefined> {
   const response = await input.fetchImpl(`https://api.github.com/repos/${input.target.owner}/${input.target.repo}${input.path}`, {
     method: input.method,
@@ -108,7 +120,7 @@ async function githubJson(input: {
     ...(input.body ? { body: JSON.stringify(input.body) } : {})
   });
 
-  if (!response.ok) {
+  if (!response.ok && !(input.okStatuses ?? []).includes(response.status)) {
     throw new Error(`${input.method} ${input.path} failed: ${response.status} ${await response.text()}`);
   }
   return `https://github.com/${input.target.owner}/${input.target.repo}/issues/${input.target.issueNumber}`;
@@ -119,9 +131,9 @@ export function compileGitHubIssueMutationIntent(
   options: { mappings?: AdapterMutationMapping[] } = {}
 ): GitHubIssueMutationCompilation {
   if (intent.domain === "status") {
-    const label = labelMappingForIntent({ intent, mappings: options.mappings ?? [] });
-    if (label) {
-      return { ok: true, intentId: intent.intentId, operation: { kind: "add_label", intentId: intent.intentId, label } };
+    const mapped = labelMappingForIntent({ intent, mappings: options.mappings ?? [] });
+    if (mapped) {
+      return { ok: true, intentId: intent.intentId, operation: { kind: "replace_mapped_label", intentId: intent.intentId, ...mapped } };
     }
     return {
       ok: false,
@@ -133,9 +145,9 @@ export function compileGitHubIssueMutationIntent(
     };
   }
   if (intent.domain === "priority") {
-    const label = labelMappingForIntent({ intent, mappings: options.mappings ?? [] });
-    if (label) {
-      return { ok: true, intentId: intent.intentId, operation: { kind: "add_label", intentId: intent.intentId, label } };
+    const mapped = labelMappingForIntent({ intent, mappings: options.mappings ?? [] });
+    if (mapped) {
+      return { ok: true, intentId: intent.intentId, operation: { kind: "replace_mapped_label", intentId: intent.intentId, ...mapped } };
     }
     return {
       ok: false,
@@ -288,6 +300,26 @@ export async function applyGitHubIssueMutationOperation(input: {
         method: "DELETE",
         path: `/issues/${input.target.issueNumber}/assignees`,
         body: { assignees: [input.operation.assignee] }
+      });
+      return { intentId: input.operation.intentId, outcome: "applied", externalUri };
+    }
+
+    if (input.operation.kind === "replace_mapped_label") {
+      for (const label of input.operation.removeLabels) {
+        await githubJson({
+          target: input.target,
+          fetchImpl,
+          method: "DELETE",
+          path: `/issues/${input.target.issueNumber}/labels/${encodeURIComponent(label)}`,
+          okStatuses: [200, 404]
+        });
+      }
+      const externalUri = await githubJson({
+        target: input.target,
+        fetchImpl,
+        method: "POST",
+        path: `/issues/${input.target.issueNumber}/labels`,
+        body: { labels: [input.operation.label] }
       });
       return { intentId: input.operation.intentId, outcome: "applied", externalUri };
     }

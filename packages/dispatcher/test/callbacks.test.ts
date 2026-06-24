@@ -71,6 +71,13 @@ describe("createGitHubCallbackSink", () => {
       uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
       body: "Done"
     });
+    await sink.deliver({
+      runId: "run_1",
+      kind: "progress",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "Starting again"
+    });
 
     expect(requests).toEqual([
       {
@@ -90,6 +97,12 @@ describe("createGitHubCallbackSink", () => {
         method: "PATCH",
         authorization: "Bearer ghs_test",
         body: { body: "Done" }
+      },
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/1/comments",
+        method: "POST",
+        authorization: "Bearer ghs_test",
+        body: { body: "Starting again" }
       }
     ]);
   });
