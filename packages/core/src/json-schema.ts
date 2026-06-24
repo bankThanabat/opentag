@@ -1,6 +1,7 @@
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   ActionHintSchema,
+  AdapterMutationMappingSchema,
   ApplyIntentOutcomeSchema,
   ApplyPlanSchema,
   ApprovalDecisionSchema,
@@ -36,6 +37,7 @@ export const OpenTagJsonSchemas = {
   RunEventImportance: zodToJsonSchema(RunEventImportanceSchema, "RunEventImportance"),
   RunEvent: zodToJsonSchema(RunEventSchema, "RunEvent"),
   ArtifactKind: zodToJsonSchema(ArtifactKindSchema, "ArtifactKind"),
+  AdapterMutationMapping: zodToJsonSchema(AdapterMutationMappingSchema, "AdapterMutationMapping"),
   CapabilityContract: zodToJsonSchema(CapabilityContractSchema, "CapabilityContract"),
   PolicyResolution: zodToJsonSchema(PolicyResolutionSchema, "PolicyResolution"),
   ProposalLineage: zodToJsonSchema(ProposalLineageSchema, "ProposalLineage"),

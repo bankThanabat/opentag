@@ -4,6 +4,7 @@ import {
   OpenTagRunSchema,
   type ActorIdentity,
   type ActionHint,
+  type AdapterMutationMapping,
   type ApprovalDecision,
   type ApplyPlan,
   type MutationIntentActionability,
@@ -125,6 +126,13 @@ export type OpenTagClient = {
   getRepositoryBinding(input: { provider: string; owner: string; repo: string }): Promise<{ binding: RepoBindingInput }>;
   upsertRepoPolicyRule(input: { provider: string; owner: string; repo: string; rule: PolicyRule }): Promise<{ rule: PolicyRule }>;
   listRepoPolicyRules(input: { provider: string; owner: string; repo: string }): Promise<{ rules: PolicyRule[] }>;
+  upsertRepoMutationMapping(input: {
+    provider: string;
+    owner: string;
+    repo: string;
+    mapping: AdapterMutationMapping;
+  }): Promise<{ mapping: AdapterMutationMapping }>;
+  listRepoMutationMappings(input: { provider: string; owner: string; repo: string }): Promise<{ mappings: AdapterMutationMapping[] }>;
   bindSlackChannel(input: SlackChannelBindingInput): Promise<void>;
   getSlackChannelBinding(input: { teamId: string; channelId: string }): Promise<{ binding: SlackChannelBindingInput }>;
   createRun(input: CreateRunInput): Promise<{ run: OpenTagRun }>;
@@ -227,6 +235,24 @@ export function createOpenTagClient(options: OpenTagClientOptions): OpenTagClien
       });
       await assertOk(response, "listRepoPolicyRules");
       return (await response.json()) as { rules: PolicyRule[] };
+    },
+
+    async upsertRepoMutationMapping(input) {
+      const response = await fetchImpl(`${baseUrl}/v1/repo-bindings/${input.provider}/${input.owner}/${input.repo}/mutation-mappings`, {
+        method: "POST",
+        headers: jsonHeaders(options.pairingToken),
+        body: JSON.stringify({ mapping: input.mapping })
+      });
+      await assertOk(response, "upsertRepoMutationMapping");
+      return (await response.json()) as { mapping: AdapterMutationMapping };
+    },
+
+    async listRepoMutationMappings(input) {
+      const response = await fetchImpl(`${baseUrl}/v1/repo-bindings/${input.provider}/${input.owner}/${input.repo}/mutation-mappings`, {
+        headers: authHeaders(options.pairingToken)
+      });
+      await assertOk(response, "listRepoMutationMappings");
+      return (await response.json()) as { mappings: AdapterMutationMapping[] };
     },
 
     async bindSlackChannel(input) {

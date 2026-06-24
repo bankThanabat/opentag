@@ -1,4 +1,4 @@
-import type { ApplyIntentOutcome, MutationIntent } from "@opentag/core";
+import type { AdapterMutationMapping, ApplyIntentOutcome, MutationIntent } from "@opentag/core";
 import type { FetchLike } from "./pull-request.js";
 
 export type GitHubIssueMutationTarget = {
@@ -7,6 +7,49 @@ export type GitHubIssueMutationTarget = {
   repo: string;
   issueNumber: number;
 };
+
+export type GitHubIssueMutationOperation =
+  | {
+      kind: "add_label";
+      intentId: string;
+      label: string;
+    }
+  | {
+      kind: "remove_label";
+      intentId: string;
+      label: string;
+    }
+  | {
+      kind: "set_labels";
+      intentId: string;
+      labels: string[];
+    }
+  | {
+      kind: "set_assignees";
+      intentId: string;
+      assignees: string[];
+    }
+  | {
+      kind: "add_assignee";
+      intentId: string;
+      assignee: string;
+    }
+  | {
+      kind: "remove_assignee";
+      intentId: string;
+      assignee: string;
+    };
+
+export type GitHubIssueMutationCompilation =
+  | {
+      ok: true;
+      intentId: string;
+      operation: GitHubIssueMutationOperation;
+    }
+  | {
+      ok: false;
+      outcome: ApplyIntentOutcome;
+    };
 
 function labelFromIntent(intent: MutationIntent): string | undefined {
   const value = intent.params?.["label"];
@@ -30,6 +73,21 @@ function assigneesFromIntent(intent: MutationIntent): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const assignees = value.filter((assignee): assignee is string => typeof assignee === "string" && assignee.length > 0);
   return assignees.length > 0 ? assignees : undefined;
+}
+
+function mappedValueFromIntent(intent: MutationIntent): string | undefined {
+  const key = intent.domain === "status" ? "status" : "priority";
+  const value = intent.params?.[key] ?? intent.params?.["value"];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function labelMappingForIntent(input: { intent: MutationIntent; mappings: AdapterMutationMapping[] }): string | undefined {
+  const semanticValue = mappedValueFromIntent(input.intent);
+  if (!semanticValue) return undefined;
+  const mapping = input.mappings.find(
+    (candidate) => candidate.adapter === "github" && candidate.domain === input.intent.domain && candidate.strategy === "label"
+  );
+  return mapping?.values[semanticValue];
 }
 
 async function githubJson(input: {
@@ -56,159 +114,210 @@ async function githubJson(input: {
   return `https://github.com/${input.target.owner}/${input.target.repo}/issues/${input.target.issueNumber}`;
 }
 
-export async function applyGitHubIssueMutationIntent(input: {
+export function compileGitHubIssueMutationIntent(
+  intent: MutationIntent,
+  options: { mappings?: AdapterMutationMapping[] } = {}
+): GitHubIssueMutationCompilation {
+  if (intent.domain === "status") {
+    const label = labelMappingForIntent({ intent, mappings: options.mappings ?? [] });
+    if (label) {
+      return { ok: true, intentId: intent.intentId, operation: { kind: "add_label", intentId: intent.intentId, label } };
+    }
+    return {
+      ok: false,
+      outcome: {
+        intentId: intent.intentId,
+        outcome: "unsupported",
+        message: "GitHub status writes require an explicit Project field or label mapping policy."
+      }
+    };
+  }
+  if (intent.domain === "priority") {
+    const label = labelMappingForIntent({ intent, mappings: options.mappings ?? [] });
+    if (label) {
+      return { ok: true, intentId: intent.intentId, operation: { kind: "add_label", intentId: intent.intentId, label } };
+    }
+    return {
+      ok: false,
+      outcome: {
+        intentId: intent.intentId,
+        outcome: "unsupported",
+        message: "GitHub priority writes require an explicit label or Project field mapping policy."
+      }
+    };
+  }
+  if (intent.domain !== "labels" && intent.domain !== "assignee") {
+    return {
+      ok: false,
+      outcome: {
+        intentId: intent.intentId,
+        outcome: "unsupported",
+        message: `GitHub apply supports labels and assignee only, not ${intent.domain}.`
+      }
+    };
+  }
+
+  if (intent.domain === "assignee") {
+    if (intent.action === "set_assignee") {
+      const assignee = assigneeFromIntent(intent);
+      return assignee
+        ? { ok: true, intentId: intent.intentId, operation: { kind: "set_assignees", intentId: intent.intentId, assignees: [assignee] } }
+        : { ok: false, outcome: { intentId: intent.intentId, outcome: "failed", message: "set_assignee requires params.assignee." } };
+    }
+    if (intent.action === "set_assignees") {
+      const assignees = assigneesFromIntent(intent);
+      return assignees
+        ? { ok: true, intentId: intent.intentId, operation: { kind: "set_assignees", intentId: intent.intentId, assignees } }
+        : { ok: false, outcome: { intentId: intent.intentId, outcome: "failed", message: "set_assignees requires params.assignees." } };
+    }
+    if (intent.action === "add_assignee") {
+      const assignee = assigneeFromIntent(intent);
+      return assignee
+        ? { ok: true, intentId: intent.intentId, operation: { kind: "add_assignee", intentId: intent.intentId, assignee } }
+        : { ok: false, outcome: { intentId: intent.intentId, outcome: "failed", message: "add_assignee requires params.assignee." } };
+    }
+    if (intent.action === "remove_assignee") {
+      const assignee = assigneeFromIntent(intent);
+      return assignee
+        ? { ok: true, intentId: intent.intentId, operation: { kind: "remove_assignee", intentId: intent.intentId, assignee } }
+        : { ok: false, outcome: { intentId: intent.intentId, outcome: "failed", message: "remove_assignee requires params.assignee." } };
+    }
+    return {
+      ok: false,
+      outcome: {
+        intentId: intent.intentId,
+        outcome: "unsupported",
+        message: `GitHub apply does not support assignee action ${intent.action}.`
+      }
+    };
+  }
+
+  if (intent.action === "add_label") {
+    const label = labelFromIntent(intent);
+    return label
+      ? { ok: true, intentId: intent.intentId, operation: { kind: "add_label", intentId: intent.intentId, label } }
+      : { ok: false, outcome: { intentId: intent.intentId, outcome: "failed", message: "add_label requires params.label." } };
+  }
+  if (intent.action === "remove_label") {
+    const label = labelFromIntent(intent);
+    return label
+      ? { ok: true, intentId: intent.intentId, operation: { kind: "remove_label", intentId: intent.intentId, label } }
+      : { ok: false, outcome: { intentId: intent.intentId, outcome: "failed", message: "remove_label requires params.label." } };
+  }
+  if (intent.action === "set_labels") {
+    const labels = labelsFromIntent(intent);
+    return labels
+      ? { ok: true, intentId: intent.intentId, operation: { kind: "set_labels", intentId: intent.intentId, labels } }
+      : { ok: false, outcome: { intentId: intent.intentId, outcome: "failed", message: "set_labels requires params.labels." } };
+  }
+
+  return {
+    ok: false,
+    outcome: {
+      intentId: intent.intentId,
+      outcome: "unsupported",
+      message: `GitHub apply does not support labels action ${intent.action}.`
+    }
+  };
+}
+
+export function compileGitHubIssueMutationIntents(
+  intents: MutationIntent[],
+  options: { mappings?: AdapterMutationMapping[] } = {}
+): GitHubIssueMutationCompilation[] {
+  return intents.map((intent) => compileGitHubIssueMutationIntent(intent, options));
+}
+
+export async function applyGitHubIssueMutationOperation(input: {
   target: GitHubIssueMutationTarget;
-  intent: MutationIntent;
+  operation: GitHubIssueMutationOperation;
   fetchImpl?: FetchLike;
 }): Promise<ApplyIntentOutcome> {
   const fetchImpl = input.fetchImpl ?? fetch;
   try {
-    if (input.intent.domain === "status") {
-      return {
-        intentId: input.intent.intentId,
-        outcome: "unsupported",
-        message: "GitHub status writes require an explicit Project field or label mapping policy."
-      };
-    }
-    if (input.intent.domain === "priority") {
-      return {
-        intentId: input.intent.intentId,
-        outcome: "unsupported",
-        message: "GitHub priority writes require an explicit label or Project field mapping policy."
-      };
-    }
-    if (input.intent.domain !== "labels" && input.intent.domain !== "assignee") {
-      return {
-        intentId: input.intent.intentId,
-        outcome: "unsupported",
-        message: `GitHub apply supports labels and assignee only, not ${input.intent.domain}.`
-      };
+    if (input.operation.kind === "set_assignees") {
+      const externalUri = await githubJson({
+        target: input.target,
+        fetchImpl,
+        method: "PATCH",
+        path: `/issues/${input.target.issueNumber}`,
+        body: { assignees: input.operation.assignees }
+      });
+      return { intentId: input.operation.intentId, outcome: "applied", externalUri };
     }
 
-    if (input.intent.domain === "assignee") {
-      if (input.intent.action === "set_assignee") {
-        const assignee = assigneeFromIntent(input.intent);
-        if (!assignee) {
-          return { intentId: input.intent.intentId, outcome: "failed", message: "set_assignee requires params.assignee." };
-        }
-        const externalUri = await githubJson({
-          target: input.target,
-          fetchImpl,
-          method: "PATCH",
-          path: `/issues/${input.target.issueNumber}`,
-          body: { assignees: [assignee] }
-        });
-        return { intentId: input.intent.intentId, outcome: "applied", externalUri };
-      }
-
-      if (input.intent.action === "set_assignees") {
-        const assignees = assigneesFromIntent(input.intent);
-        if (!assignees) {
-          return { intentId: input.intent.intentId, outcome: "failed", message: "set_assignees requires params.assignees." };
-        }
-        const externalUri = await githubJson({
-          target: input.target,
-          fetchImpl,
-          method: "PATCH",
-          path: `/issues/${input.target.issueNumber}`,
-          body: { assignees }
-        });
-        return { intentId: input.intent.intentId, outcome: "applied", externalUri };
-      }
-
-      if (input.intent.action === "add_assignee") {
-        const assignee = assigneeFromIntent(input.intent);
-        if (!assignee) {
-          return { intentId: input.intent.intentId, outcome: "failed", message: "add_assignee requires params.assignee." };
-        }
-        const externalUri = await githubJson({
-          target: input.target,
-          fetchImpl,
-          method: "POST",
-          path: `/issues/${input.target.issueNumber}/assignees`,
-          body: { assignees: [assignee] }
-        });
-        return { intentId: input.intent.intentId, outcome: "applied", externalUri };
-      }
-
-      if (input.intent.action === "remove_assignee") {
-        const assignee = assigneeFromIntent(input.intent);
-        if (!assignee) {
-          return { intentId: input.intent.intentId, outcome: "failed", message: "remove_assignee requires params.assignee." };
-        }
-        const externalUri = await githubJson({
-          target: input.target,
-          fetchImpl,
-          method: "DELETE",
-          path: `/issues/${input.target.issueNumber}/assignees`,
-          body: { assignees: [assignee] }
-        });
-        return { intentId: input.intent.intentId, outcome: "applied", externalUri };
-      }
-
-      return {
-        intentId: input.intent.intentId,
-        outcome: "unsupported",
-        message: `GitHub apply does not support assignee action ${input.intent.action}.`
-      };
+    if (input.operation.kind === "add_assignee") {
+      const externalUri = await githubJson({
+        target: input.target,
+        fetchImpl,
+        method: "POST",
+        path: `/issues/${input.target.issueNumber}/assignees`,
+        body: { assignees: [input.operation.assignee] }
+      });
+      return { intentId: input.operation.intentId, outcome: "applied", externalUri };
     }
 
-    if (input.intent.action === "add_label") {
-      const label = labelFromIntent(input.intent);
-      if (!label) {
-        return { intentId: input.intent.intentId, outcome: "failed", message: "add_label requires params.label." };
-      }
+    if (input.operation.kind === "remove_assignee") {
+      const externalUri = await githubJson({
+        target: input.target,
+        fetchImpl,
+        method: "DELETE",
+        path: `/issues/${input.target.issueNumber}/assignees`,
+        body: { assignees: [input.operation.assignee] }
+      });
+      return { intentId: input.operation.intentId, outcome: "applied", externalUri };
+    }
+
+    if (input.operation.kind === "add_label") {
       const externalUri = await githubJson({
         target: input.target,
         fetchImpl,
         method: "POST",
         path: `/issues/${input.target.issueNumber}/labels`,
-        body: { labels: [label] }
+        body: { labels: [input.operation.label] }
       });
-      return { intentId: input.intent.intentId, outcome: "applied", externalUri };
+      return { intentId: input.operation.intentId, outcome: "applied", externalUri };
     }
 
-    if (input.intent.action === "remove_label") {
-      const label = labelFromIntent(input.intent);
-      if (!label) {
-        return { intentId: input.intent.intentId, outcome: "failed", message: "remove_label requires params.label." };
-      }
+    if (input.operation.kind === "remove_label") {
       const externalUri = await githubJson({
         target: input.target,
         fetchImpl,
         method: "DELETE",
-        path: `/issues/${input.target.issueNumber}/labels/${encodeURIComponent(label)}`
+        path: `/issues/${input.target.issueNumber}/labels/${encodeURIComponent(input.operation.label)}`
       });
-      return { intentId: input.intent.intentId, outcome: "applied", externalUri };
+      return { intentId: input.operation.intentId, outcome: "applied", externalUri };
     }
 
-    if (input.intent.action === "set_labels") {
-      const labels = labelsFromIntent(input.intent);
-      if (!labels) {
-        return { intentId: input.intent.intentId, outcome: "failed", message: "set_labels requires params.labels." };
-      }
-      const externalUri = await githubJson({
-        target: input.target,
-        fetchImpl,
-        method: "PUT",
-        path: `/issues/${input.target.issueNumber}/labels`,
-        body: { labels }
-      });
-      return { intentId: input.intent.intentId, outcome: "applied", externalUri };
-    }
-
-    return {
-      intentId: input.intent.intentId,
-      outcome: "unsupported",
-      message: `GitHub apply does not support labels action ${input.intent.action}.`
-    };
+    const externalUri = await githubJson({
+      target: input.target,
+      fetchImpl,
+      method: "PUT",
+      path: `/issues/${input.target.issueNumber}/labels`,
+      body: { labels: input.operation.labels }
+    });
+    return { intentId: input.operation.intentId, outcome: "applied", externalUri };
   } catch (error) {
     return {
-      intentId: input.intent.intentId,
+      intentId: input.operation.intentId,
       outcome: "failed",
       error: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+export async function applyGitHubIssueMutationIntent(input: {
+  target: GitHubIssueMutationTarget;
+  intent: MutationIntent;
+  fetchImpl?: FetchLike;
+}): Promise<ApplyIntentOutcome> {
+  const compiled = compileGitHubIssueMutationIntent(input.intent);
+  if (!compiled.ok) return compiled.outcome;
+  return applyGitHubIssueMutationOperation({
+    target: input.target,
+    operation: compiled.operation,
+    ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
+  });
 }
 
 export async function applyGitHubIssueMutationIntents(input: {

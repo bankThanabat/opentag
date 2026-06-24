@@ -1,4 +1,5 @@
 import {
+  AdapterMutationMappingSchema,
   ActorIdentitySchema,
   ActionHintSchema,
   type OpenTagEvent,
@@ -8,7 +9,11 @@ import {
   RunEventImportanceSchema,
   RunEventVisibilitySchema
 } from "@opentag/core";
-import { applyGitHubIssueMutationIntents, type FetchLike as GitHubFetchLike } from "@opentag/github";
+import {
+  applyGitHubIssueMutationOperation,
+  compileGitHubIssueMutationIntents,
+  type FetchLike as GitHubFetchLike
+} from "@opentag/github";
 import type { SlackBlock } from "@opentag/slack";
 import { createOpenTagRepository, migrateSchema } from "@opentag/store";
 import Database from "better-sqlite3";
@@ -41,6 +46,10 @@ const CreateSlackChannelBindingSchema = z.object({
 
 const UpsertPolicyRuleSchema = z.object({
   rule: PolicyRuleSchema
+});
+
+const UpsertMutationMappingSchema = z.object({
+  mapping: AdapterMutationMappingSchema
 });
 
 const CreateRunSchema = z.object({
@@ -126,6 +135,13 @@ function childEventFromParent(input: {
       }
     }
   };
+}
+
+function mappingsFromAdapterPlan(adapterPlan: unknown) {
+  if (!adapterPlan || typeof adapterPlan !== "object" || Array.isArray(adapterPlan)) return [];
+  const mappings = (adapterPlan as { mappings?: unknown }).mappings;
+  if (!Array.isArray(mappings)) return [];
+  return mappings.map((mapping) => AdapterMutationMappingSchema.parse(mapping));
 }
 
 export type CallbackMessage = {
@@ -247,6 +263,26 @@ export function createDispatcherApp(input: {
       repo: c.req.param("repo")
     });
     return c.json({ rules });
+  });
+
+  app.post("/v1/repo-bindings/:provider/:owner/:repo/mutation-mappings", async (c) => {
+    const parsed = UpsertMutationMappingSchema.parse(await c.req.json());
+    const mapping = await repo.upsertRepoMutationMapping({
+      provider: c.req.param("provider"),
+      owner: c.req.param("owner"),
+      repo: c.req.param("repo"),
+      mapping: parsed.mapping
+    });
+    return c.json({ mapping }, 201);
+  });
+
+  app.get("/v1/repo-bindings/:provider/:owner/:repo/mutation-mappings", async (c) => {
+    const mappings = await repo.listRepoMutationMappings({
+      provider: c.req.param("provider"),
+      owner: c.req.param("owner"),
+      repo: c.req.param("repo")
+    });
+    return c.json({ mappings });
   });
 
   app.post("/v1/slack-channel-bindings", async (c) => {
@@ -444,16 +480,28 @@ export function createDispatcherApp(input: {
         const outcome = preflightOutcomeByIntentId.get(intent.intentId);
         return outcome?.outcome === "skipped" && outcome.message?.startsWith("Preflight passed");
       });
-      const executedOutcomes = await applyGitHubIssueMutationIntents({
-        target: {
-          token: input.githubApply.token,
-          owner,
-          repo: repoName,
-          issueNumber
-        },
-        intents: executableIntents,
-        ...(input.githubApply.fetchImpl ? { fetchImpl: input.githubApply.fetchImpl } : {})
-      });
+      const target = {
+        token: input.githubApply.token,
+        owner,
+        repo: repoName,
+        issueNumber
+      };
+      const executedOutcomes = [];
+      for (const compilation of compileGitHubIssueMutationIntents(executableIntents, {
+        mappings: mappingsFromAdapterPlan(plan.adapterPlan)
+      })) {
+        if (!compilation.ok) {
+          executedOutcomes.push(compilation.outcome);
+          continue;
+        }
+        executedOutcomes.push(
+          await applyGitHubIssueMutationOperation({
+            target,
+            operation: compilation.operation,
+            ...(input.githubApply.fetchImpl ? { fetchImpl: input.githubApply.fetchImpl } : {})
+          })
+        );
+      }
       const executedOutcomeByIntentId = new Map(executedOutcomes.map((outcome) => [outcome.intentId, outcome]));
       const mergedOutcomes = (plan.outcomes ?? []).map((outcome) => executedOutcomeByIntentId.get(outcome.intentId) ?? outcome);
       const executedPlan = await repo.updateApplyPlanOutcomes({

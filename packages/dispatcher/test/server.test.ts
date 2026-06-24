@@ -102,6 +102,31 @@ describe("dispatcher API", () => {
     });
   });
 
+  it("stores and returns repo mutation mappings", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+    const response = await app.request("/v1/repo-bindings/github/acme/demo/mutation-mappings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mapping: {
+          id: "github_status_labels",
+          adapter: "github",
+          domain: "status",
+          strategy: "label",
+          values: { blocked: "status/blocked" }
+        }
+      })
+    });
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({ mapping: { id: "github_status_labels" } });
+
+    const listResponse = await app.request("/v1/repo-bindings/github/acme/demo/mutation-mappings");
+    expect(listResponse.status).toBe(200);
+    await expect(listResponse.json()).resolves.toMatchObject({
+      mappings: [{ id: "github_status_labels", domain: "status" }]
+    });
+  });
+
   it("delivers acknowledgement, progress, and final callback messages with audit events", async () => {
     const delivered: { kind: string; body: string; blocks?: unknown[] }[] = [];
     const app = createDispatcherApp({
@@ -602,6 +627,126 @@ describe("dispatcher API", () => {
     const eventsResponse = await app.request("/v1/runs/run_execute/events");
     const { events } = await eventsResponse.json();
     expect(events.map((event: { type: string }) => event.type)).toContain("apply_plan.executed");
+  });
+
+  it("executes approved GitHub status intents through label mappings", async () => {
+    const githubRequests: Array<{ url: string; method: string; body: unknown; authorization: string | null }> = [];
+    const app = createDispatcherApp({
+      databasePath: ":memory:",
+      githubApply: {
+        token: "ghs_test",
+        fetchImpl: (async (url, init) => {
+          githubRequests.push({
+            url: String(url),
+            method: init?.method ?? "GET",
+            body: init?.body ? JSON.parse(String(init.body)) : undefined,
+            authorization: new Headers(init?.headers).get("authorization")
+          });
+          return Response.json({});
+        }) as typeof fetch
+      }
+    });
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        allowedActors: ["octocat"]
+      })
+    });
+    await app.request("/v1/repo-bindings/github/acme/demo/mutation-mappings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mapping: {
+          id: "github_status_labels",
+          adapter: "github",
+          domain: "status",
+          strategy: "label",
+          values: { blocked: "status/blocked" }
+        }
+      })
+    });
+
+    await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        runId: "run_status_mapping",
+        event: {
+          ...validEvent,
+          id: "evt_status_mapping",
+          sourceEventId: "comment_status_mapping",
+          permissions: [...validEvent.permissions, { scope: "repo:write", reason: "mutate issue status after approval" }],
+          metadata: { owner: "acme", repo: "demo", issueNumber: 8 }
+        }
+      })
+    });
+    await app.request("/v1/runs/run_status_mapping/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        result: {
+          conclusion: "needs_human",
+          summary: "Prepared status proposal.",
+          suggestedChanges: [
+            {
+              proposalId: "proposal_status_mapping",
+              createdAt: "2026-06-24T00:00:01.000Z",
+              sourceRunId: "run_status_mapping",
+              summary: "Mark blocked.",
+              intents: [
+                {
+                  intentId: "intent_status_blocked",
+                  domain: "status",
+                  action: "transition_status",
+                  summary: "Mark blocked.",
+                  params: { status: "blocked" }
+                }
+              ]
+            }
+          ]
+        }
+      })
+    });
+    await app.request("/v1/proposals/proposal_status_mapping/approvals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "approval_status_mapping",
+        approvedIntentIds: ["intent_status_blocked"],
+        approvedBy: { provider: "github", providerUserId: "42", handle: "octocat" },
+        approvedAt: "2026-06-24T00:00:02.000Z"
+      })
+    });
+
+    const applyResponse = await app.request("/v1/proposals/proposal_status_mapping/apply-plans", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "apply_status_mapping",
+        approvalDecisionId: "approval_status_mapping",
+        adapter: "github",
+        execute: true
+      })
+    });
+    expect(applyResponse.status).toBe(201);
+    await expect(applyResponse.json()).resolves.toMatchObject({
+      plan: {
+        outcomes: [{ intentId: "intent_status_blocked", outcome: "applied" }]
+      }
+    });
+    expect(githubRequests).toEqual([
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/8/labels",
+        method: "POST",
+        authorization: "Bearer ghs_test",
+        body: { labels: ["status/blocked"] }
+      }
+    ]);
   });
 
   it("adds a stable statusMessageKey when progress callbacks are delivered", async () => {

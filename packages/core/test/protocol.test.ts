@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { contextPacketFromEvent, preflightMutationIntent, protocolRunFieldsFromEvent, workThreadFromEvent } from "../src/protocol.js";
+import {
+  assembleContextPacketFromEvent,
+  contextPacketFromEvent,
+  preflightMutationIntent,
+  protocolRunFieldsFromEvent,
+  workThreadFromEvent
+} from "../src/protocol.js";
 import type { OpenTagEvent } from "../src/schema.js";
 
 const githubEvent: OpenTagEvent = {
@@ -76,6 +82,25 @@ describe("protocol helpers", () => {
     expect(packet.assembly?.stages).toEqual(["collect", "classify", "filter", "preserve", "summarize", "budget", "emit"]);
     expect(packet.risks?.[0]).toContain("repo:write");
     expect(packet.exclusions?.[0]).toContain("explicit capability");
+  });
+
+  it("applies context packet budget as an explicit assembly stage", () => {
+    const packet = assembleContextPacketFromEvent(
+      {
+        ...githubEvent,
+        context: [
+          ...githubEvent.context,
+          { kind: "github.repo", uri: "https://github.com/acme/demo", visibility: "public" },
+          { kind: "url", uri: "https://example.com/background", visibility: "public" }
+        ]
+      },
+      "2026-06-24T00:00:00.000Z",
+      { budgetTokens: 500 }
+    );
+
+    expect(packet.sourcePointers).toHaveLength(1);
+    expect(packet.assembly?.budgetTokens).toBe(500);
+    expect(packet.assembly?.stages).toContain("budget");
   });
 
   it("preflights mutation intents through platform permission and OpenTag policy", () => {

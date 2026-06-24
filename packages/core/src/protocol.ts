@@ -23,6 +23,103 @@ const POLICY_SCOPE_ORDER: PolicyScope[] = [
   "primary_anchor_override"
 ];
 
+export type ContextSourceClassification = "primary_evidence" | "supporting_context" | "background_noise" | "sensitive_material";
+
+export type ClassifiedContextPointer = {
+  pointer: ContextPointer;
+  classification: ContextSourceClassification;
+  reason: string;
+};
+
+export type ContextPacketAssemblyOptions = {
+  budgetTokens?: number;
+  risks?: string[];
+  exclusions?: string[];
+  redactions?: Array<{ reason: string; sourceUri?: string }>;
+};
+
+function classifyContextPointer(pointer: ContextPointer): ClassifiedContextPointer {
+  if (pointer.kind === "text") {
+    return { pointer, classification: "primary_evidence", reason: "Original user-authored text is primary evidence." };
+  }
+  if (pointer.kind === "github.issue" || pointer.kind === "github.pull_request" || pointer.kind === "github.comment" || pointer.kind === "slack.thread" || pointer.kind === "slack.message") {
+    return { pointer, classification: "primary_evidence", reason: `${pointer.kind} is directly attached to the invocation.` };
+  }
+  if (pointer.kind === "github.repo" || pointer.kind === "file" || pointer.kind === "url") {
+    return { pointer, classification: "supporting_context", reason: `${pointer.kind} supports execution but is not itself the request.` };
+  }
+  return { pointer, classification: "supporting_context", reason: "Pointer is relevant context." };
+}
+
+export function collectContextPointers(event: OpenTagEvent): ContextPointer[] {
+  return event.context;
+}
+
+export function classifyContextPointers(pointers: ContextPointer[]): ClassifiedContextPointer[] {
+  return pointers.map((pointer) => classifyContextPointer(pointer));
+}
+
+export function filterClassifiedContextPointers(classified: ClassifiedContextPointer[]): ClassifiedContextPointer[] {
+  return classified.filter((entry) => entry.classification !== "background_noise" && entry.classification !== "sensitive_material");
+}
+
+export function preserveContextFacts(event: OpenTagEvent, classified: ClassifiedContextPointer[]): Array<{ text: string; sourceUri?: string }> {
+  const sourceUri = classified[0]?.pointer.uri;
+  return [
+    {
+      text: `Requested intent: ${event.command.intent}`,
+      ...(sourceUri ? { sourceUri } : {})
+    },
+    ...classified.map((entry) => ({
+      text: `${entry.classification}: ${entry.pointer.kind}`,
+      sourceUri: entry.pointer.uri
+    }))
+  ];
+}
+
+export function summarizeContextPacket(event: OpenTagEvent): string {
+  return event.command.rawText || `OpenTag ${event.command.intent} request`;
+}
+
+export function budgetContextPointers(classified: ClassifiedContextPointer[], budgetTokens?: number): ClassifiedContextPointer[] {
+  if (!budgetTokens) return classified;
+  const maxPointers = Math.max(1, Math.floor(budgetTokens / 500));
+  return classified.slice(0, maxPointers);
+}
+
+export function assembleContextPacketFromEvent(
+  event: OpenTagEvent,
+  emittedAt = event.receivedAt,
+  options: ContextPacketAssemblyOptions = {}
+): ContextPacket {
+  const collected = collectContextPointers(event);
+  const classified = classifyContextPointers(collected);
+  const filtered = filterClassifiedContextPointers(classified);
+  const budgeted = budgetContextPointers(filtered, options.budgetTokens);
+  const writeScopes = event.permissions
+    .map((permission) => permission.scope)
+    .filter((scope) => scope === "repo:write" || scope === "pr:create" || scope === "pr:update");
+  const summary = summarizeContextPacket(event);
+  return {
+    summary,
+    sourcePointers: budgeted.map((entry) => entry.pointer),
+    facts: preserveContextFacts(event, budgeted),
+    risks:
+      options.risks ??
+      (writeScopes.length > 0
+        ? [`External write-capable scopes were requested: ${writeScopes.join(", ")}.`]
+        : ["No external write-capable scopes were requested."]),
+    exclusions: options.exclusions ?? ["Do not mutate external state unless an explicit capability and policy allow it."],
+    mustPreserve: [summary],
+    ...(options.redactions?.length ? { redactions: options.redactions } : {}),
+    assembly: {
+      stages: [...CONTEXT_PACKET_STAGES],
+      ...(options.budgetTokens ? { budgetTokens: options.budgetTokens } : {}),
+      emittedAt
+    }
+  };
+}
+
 export const DefaultCapabilityContracts = [
   {
     id: "reply_thread",
@@ -180,32 +277,7 @@ export function workThreadFromEvent(event: OpenTagEvent): WorkThread | undefined
 }
 
 export function contextPacketFromEvent(event: OpenTagEvent, emittedAt = event.receivedAt): ContextPacket {
-  const sourceUri = event.context[0]?.uri;
-  const writeScopes = event.permissions
-    .map((permission) => permission.scope)
-    .filter((scope) => scope === "repo:write" || scope === "pr:create" || scope === "pr:update");
-
-  const summary = event.command.rawText || `OpenTag ${event.command.intent} request`;
-  return {
-    summary,
-    sourcePointers: event.context,
-    facts: [
-      {
-        text: `Requested intent: ${event.command.intent}`,
-        ...(sourceUri ? { sourceUri } : {})
-      }
-    ],
-    risks:
-      writeScopes.length > 0
-        ? [`External write-capable scopes were requested: ${writeScopes.join(", ")}.`]
-        : ["No external write-capable scopes were requested."],
-    exclusions: ["Do not mutate external state unless an explicit capability and policy allow it."],
-    mustPreserve: [summary],
-    assembly: {
-      stages: [...CONTEXT_PACKET_STAGES],
-      emittedAt
-    }
-  };
+  return assembleContextPacketFromEvent(event, emittedAt);
 }
 
 export function protocolRunFieldsFromEvent(

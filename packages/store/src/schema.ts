@@ -94,6 +94,15 @@ export const repoPolicyRules = sqliteTable("repo_policy_rules", {
   createdAt: text("created_at").notNull()
 });
 
+export const repoMutationMappings = sqliteTable("repo_mutation_mappings", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  owner: text("owner").notNull(),
+  repo: text("repo").notNull(),
+  mappingJson: text("mapping_json").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
 export const slackChannelBindings = sqliteTable(
   "slack_channel_bindings",
   {
@@ -185,6 +194,14 @@ export function migrateSchema(sqlite: Database.Database): void {
       owner TEXT NOT NULL,
       repo TEXT NOT NULL,
       rule_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS repo_mutation_mappings (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      mapping_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS slack_channel_bindings (

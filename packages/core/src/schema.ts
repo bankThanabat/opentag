@@ -31,6 +31,15 @@ export const ContextPointerSchema = z.object({
     "github.pull_request",
     "github.comment",
     "github.commit",
+    "slack.channel",
+    "slack.thread",
+    "slack.message",
+    "lark.chat",
+    "lark.thread",
+    "lark.message",
+    "lark.doc",
+    "lark.base",
+    "lark.base_record",
     "file",
     "url",
     "text"
@@ -126,6 +135,15 @@ export const PolicyResolutionSchema = z.object({
   resolvedBy: PolicyScopeSchema,
   rules: z.array(PolicyRuleSchema),
   reason: z.string().min(1)
+});
+
+export const AdapterMutationMappingSchema = z.object({
+  id: z.string().min(1),
+  adapter: z.string().min(1),
+  domain: z.enum(["status", "priority"]),
+  strategy: z.enum(["label"]),
+  values: z.record(z.string().min(1)),
+  description: z.string().min(1).optional()
 });
 
 export const SuccessMetricNameSchema = z.enum([
@@ -367,6 +385,7 @@ export type PolicyScope = z.infer<typeof PolicyScopeSchema>;
 export type PolicyEffect = z.infer<typeof PolicyEffectSchema>;
 export type PolicyRule = z.infer<typeof PolicyRuleSchema>;
 export type PolicyResolution = z.infer<typeof PolicyResolutionSchema>;
+export type AdapterMutationMapping = z.infer<typeof AdapterMutationMappingSchema>;
 export type SuccessMetricName = z.infer<typeof SuccessMetricNameSchema>;
 export type CallbackRoute = z.infer<typeof CallbackRouteSchema>;
 export type WorkItemReference = z.infer<typeof WorkItemReferenceSchema>;

@@ -3,6 +3,7 @@ import {
   ApplyIntentOutcomeSchema,
   ApplyPlanSchema,
   ActionHintSchema,
+  AdapterMutationMappingSchema,
   OpenTagEventSchema,
   OpenTagRunResultSchema,
   PolicyRuleSchema,
@@ -16,6 +17,7 @@ import {
   type ApplyIntentOutcome,
   type ApplyPlan,
   type ActionHint,
+  type AdapterMutationMapping,
   type MutationIntentActionability,
   type OpenTagEvent,
   type OpenTagRun,
@@ -32,6 +34,7 @@ import {
   applyPlans,
   approvalDecisions,
   repoBindings,
+  repoMutationMappings,
   repoPolicyRules,
   runEvents,
   runners,
@@ -386,6 +389,46 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         .where(and(eq(repoPolicyRules.provider, input.provider), eq(repoPolicyRules.owner, input.owner), eq(repoPolicyRules.repo, input.repo)))
         .orderBy(asc(repoPolicyRules.createdAt));
       return rows.map((row) => PolicyRuleSchema.parse(JSON.parse(row.ruleJson)));
+    },
+
+    async upsertRepoMutationMapping(input: {
+      provider: string;
+      owner: string;
+      repo: string;
+      mapping: AdapterMutationMapping;
+    }): Promise<AdapterMutationMapping> {
+      const mapping = AdapterMutationMappingSchema.parse(input.mapping);
+      const createdAt = nowIso();
+      await db
+        .insert(repoMutationMappings)
+        .values({
+          id: mapping.id,
+          provider: input.provider,
+          owner: input.owner,
+          repo: input.repo,
+          mappingJson: JSON.stringify(mapping),
+          createdAt
+        })
+        .onConflictDoUpdate({
+          target: repoMutationMappings.id,
+          set: {
+            provider: input.provider,
+            owner: input.owner,
+            repo: input.repo,
+            mappingJson: JSON.stringify(mapping),
+            createdAt
+          }
+        });
+      return mapping;
+    },
+
+    async listRepoMutationMappings(input: { provider: string; owner: string; repo: string }): Promise<AdapterMutationMapping[]> {
+      const rows = await db
+        .select()
+        .from(repoMutationMappings)
+        .where(and(eq(repoMutationMappings.provider, input.provider), eq(repoMutationMappings.owner, input.owner), eq(repoMutationMappings.repo, input.repo)))
+        .orderBy(asc(repoMutationMappings.createdAt));
+      return rows.map((row) => AdapterMutationMappingSchema.parse(JSON.parse(row.mappingJson)));
     },
 
     async createSlackChannelBinding(input: SlackChannelBinding): Promise<void> {
@@ -852,6 +895,20 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
             .orderBy(asc(repoPolicyRules.createdAt))
         : [];
       const storedPolicyRules = storedPolicyRuleRows.map((row) => PolicyRuleSchema.parse(JSON.parse(row.ruleJson)));
+      const storedMappingRows = repoKey
+        ? await db
+            .select()
+            .from(repoMutationMappings)
+            .where(
+              and(
+                eq(repoMutationMappings.provider, repoKey.provider),
+                eq(repoMutationMappings.owner, repoKey.owner),
+                eq(repoMutationMappings.repo, repoKey.repo)
+              )
+            )
+            .orderBy(asc(repoMutationMappings.createdAt))
+        : [];
+      const storedMappings = storedMappingRows.map((row) => AdapterMutationMappingSchema.parse(JSON.parse(row.mappingJson)));
       const selectedIntentIds = input.selectedIntentIds ?? decision.approvedIntentIds;
       const approvedIntentIds = new Set(decision.approvedIntentIds);
       const proposalIntents = new Map(storedProposal.snapshot.intents.map((intent) => [intent.intentId, intent]));
@@ -905,7 +962,8 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         ...(input.adapter ? { adapter: input.adapter } : {}),
         adapterPlan: {
           semantics: "preflight first, then per-intent outcome",
-          externalWritesExecuted: false
+          externalWritesExecuted: false,
+          mappings: storedMappings
         },
         outcomes
       });

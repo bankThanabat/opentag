@@ -423,6 +423,92 @@ describe("OpenTag repository", () => {
     ]);
   });
 
+  it("stores repo mutation mappings and includes them in apply plans", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.upsertRepoMutationMapping({
+      provider: "github",
+      owner: "acme",
+      repo: "demo",
+      mapping: {
+        id: "github_status_labels",
+        adapter: "github",
+        domain: "status",
+        strategy: "label",
+        values: { blocked: "status/blocked" }
+      }
+    });
+    await expect(repo.listRepoMutationMappings({ provider: "github", owner: "acme", repo: "demo" })).resolves.toEqual([
+      expect.objectContaining({ id: "github_status_labels", domain: "status" })
+    ]);
+
+    await repo.createRun({
+      id: "run_mapping",
+      event: {
+        id: "evt_mapping",
+        source: "github",
+        sourceEventId: "comment_mapping",
+        receivedAt: "2026-06-24T00:00:00.000Z",
+        actor: { provider: "github", providerUserId: "42", handle: "octocat" },
+        target: { mention: "@opentag", agentId: "opentag" },
+        command: { rawText: "mark blocked", intent: "run", args: {} },
+        context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/5", visibility: "public" }],
+        permissions: [
+          { scope: "issue:comment", reason: "reply to source thread" },
+          { scope: "repo:write", reason: "mutate status after approval" }
+        ],
+        callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/5/comments" },
+        metadata: { owner: "acme", repo: "demo", issueNumber: 5 }
+      }
+    });
+    await repo.completeRun({
+      runId: "run_mapping",
+      result: {
+        conclusion: "needs_human",
+        summary: "Prepared status proposal.",
+        suggestedChanges: [
+          {
+            proposalId: "proposal_mapping",
+            createdAt: "2026-06-24T00:00:01.000Z",
+            summary: "Mark blocked.",
+            intents: [
+              {
+                intentId: "intent_status_blocked",
+                domain: "status",
+                action: "transition_status",
+                summary: "Mark blocked.",
+                params: { status: "blocked" }
+              }
+            ]
+          }
+        ]
+      }
+    });
+    await repo.recordApprovalDecision({
+      id: "approval_mapping",
+      proposalId: "proposal_mapping",
+      approvedIntentIds: ["intent_status_blocked"],
+      approvedBy: { provider: "github", providerUserId: "42", handle: "octocat" },
+      approvedAt: "2026-06-24T00:00:02.000Z",
+      scope: "manual"
+    });
+
+    const plan = await repo.createApplyPlan({
+      id: "apply_mapping",
+      proposalId: "proposal_mapping",
+      approvalDecisionId: "approval_mapping",
+      adapter: "github"
+    });
+
+    expect(plan?.outcomes).toEqual([expect.objectContaining({ intentId: "intent_status_blocked", outcome: "skipped" })]);
+    expect(plan?.adapterPlan).toMatchObject({
+      mappings: [{ id: "github_status_labels", domain: "status", values: { blocked: "status/blocked" } }]
+    });
+  });
+
   it("computes domain-scoped proposal supersession", async () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);

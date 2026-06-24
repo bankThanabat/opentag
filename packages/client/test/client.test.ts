@@ -251,4 +251,53 @@ describe("@opentag/client", () => {
       }
     ]);
   });
+
+  it("calls repo mutation mapping endpoints", async () => {
+    const requests: Array<{ url: string; method: string; body?: unknown }> = [];
+    const mapping = {
+      id: "github_status_labels",
+      adapter: "github" as const,
+      domain: "status" as const,
+      strategy: "label" as const,
+      values: { blocked: "status/blocked" }
+    };
+    const client = createOpenTagClient({
+      dispatcherUrl: "http://dispatcher.test",
+      fetchImpl: async (url, init) => {
+        requests.push({
+          url: String(url),
+          method: init?.method ?? "GET",
+          ...(init?.body ? { body: JSON.parse(String(init.body)) } : {})
+        });
+        if (init?.method === "POST") {
+          return jsonResponse({ mapping }, 201);
+        }
+        return jsonResponse({ mappings: [mapping] });
+      }
+    });
+
+    await expect(
+      client.upsertRepoMutationMapping({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        mapping
+      })
+    ).resolves.toMatchObject({ mapping: { id: "github_status_labels" } });
+    await expect(client.listRepoMutationMappings({ provider: "github", owner: "acme", repo: "demo" })).resolves.toMatchObject({
+      mappings: [{ id: "github_status_labels" }]
+    });
+
+    expect(requests).toEqual([
+      {
+        url: "http://dispatcher.test/v1/repo-bindings/github/acme/demo/mutation-mappings",
+        method: "POST",
+        body: { mapping }
+      },
+      {
+        url: "http://dispatcher.test/v1/repo-bindings/github/acme/demo/mutation-mappings",
+        method: "GET"
+      }
+    ]);
+  });
 });

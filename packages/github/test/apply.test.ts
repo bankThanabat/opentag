@@ -1,7 +1,109 @@
 import { describe, expect, it } from "vitest";
-import { applyGitHubIssueMutationIntent } from "../src/apply.js";
+import { applyGitHubIssueMutationIntent, compileGitHubIssueMutationIntent } from "../src/apply.js";
 
 describe("GitHub apply helpers", () => {
+  it("compiles semantic mutation intents into GitHub issue operations", () => {
+    expect(
+      compileGitHubIssueMutationIntent({
+        intentId: "intent_add",
+        domain: "labels",
+        action: "add_label",
+        summary: "Add label.",
+        params: { label: "bug" }
+      })
+    ).toEqual({
+      ok: true,
+      intentId: "intent_add",
+      operation: {
+        kind: "add_label",
+        intentId: "intent_add",
+        label: "bug"
+      }
+    });
+
+    expect(
+      compileGitHubIssueMutationIntent({
+        intentId: "intent_assignee",
+        domain: "assignee",
+        action: "set_assignee",
+        summary: "Set assignee.",
+        params: { assignee: "alice" }
+      })
+    ).toEqual({
+      ok: true,
+      intentId: "intent_assignee",
+      operation: {
+        kind: "set_assignees",
+        intentId: "intent_assignee",
+        assignees: ["alice"]
+      }
+    });
+  });
+
+  it("compiles status and priority through explicit GitHub label mappings", () => {
+    expect(
+      compileGitHubIssueMutationIntent(
+        {
+          intentId: "intent_status",
+          domain: "status",
+          action: "transition_status",
+          summary: "Mark blocked.",
+          params: { status: "blocked" }
+        },
+        {
+          mappings: [
+            {
+              id: "github_status_labels",
+              adapter: "github",
+              domain: "status",
+              strategy: "label",
+              values: { blocked: "status/blocked" }
+            }
+          ]
+        }
+      )
+    ).toEqual({
+      ok: true,
+      intentId: "intent_status",
+      operation: {
+        kind: "add_label",
+        intentId: "intent_status",
+        label: "status/blocked"
+      }
+    });
+
+    expect(
+      compileGitHubIssueMutationIntent(
+        {
+          intentId: "intent_priority",
+          domain: "priority",
+          action: "set_priority",
+          summary: "Set P1.",
+          params: { priority: "P1" }
+        },
+        {
+          mappings: [
+            {
+              id: "github_priority_labels",
+              adapter: "github",
+              domain: "priority",
+              strategy: "label",
+              values: { P1: "priority/P1" }
+            }
+          ]
+        }
+      )
+    ).toEqual({
+      ok: true,
+      intentId: "intent_priority",
+      operation: {
+        kind: "add_label",
+        intentId: "intent_priority",
+        label: "priority/P1"
+      }
+    });
+  });
+
   it("applies label mutation intents through GitHub issue APIs", async () => {
     const requests: Array<{ url: string; method: string; body?: unknown; authorization: string | null }> = [];
     const fetchImpl = (async (url, init) => {
