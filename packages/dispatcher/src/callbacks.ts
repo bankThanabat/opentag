@@ -12,7 +12,12 @@ function slackBotTokenFor(input: {
   botTokensByAgentId?: Record<string, string>;
   agentId?: string;
 }): string | undefined {
-  if (input.agentId && input.botTokensByAgentId?.[input.agentId]) {
+  if (
+    input.agentId &&
+    input.botTokensByAgentId &&
+    Object.hasOwn(input.botTokensByAgentId, input.agentId) &&
+    typeof input.botTokensByAgentId[input.agentId] === "string"
+  ) {
     return input.botTokensByAgentId[input.agentId];
   }
   return input.botToken;

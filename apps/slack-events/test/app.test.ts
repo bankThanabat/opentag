@@ -168,6 +168,38 @@ describe("Slack events app", () => {
     await expect(response.text()).resolves.toBe("abc123");
   });
 
+  it("returns 400 for malformed JSON payloads", async () => {
+    const rawBody = "{not-json";
+    const timestamp = "1710000000";
+    const app = createSlackEventsApp({
+      slackApps: [{ signingSecret: "secret", agentId: "opentag" }],
+      async resolveChannelBinding() {
+        return null;
+      },
+      async createRun() {
+        return { runId: "run_1" };
+      },
+      now: () => "2026-06-24T00:00:00.000Z"
+    });
+
+    const response = await app.request("/slack/events", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": computeSlackSignature({
+          signingSecret: "secret",
+          timestamp,
+          rawBody
+        })
+      },
+      body: rawBody
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "invalid_json" });
+  });
+
   it("rejects invalid Slack signatures", async () => {
     const app = createSlackEventsApp({
       slackApps: [{ signingSecret: "secret", agentId: "opentag" }],

@@ -57,6 +57,14 @@ export function createSlackEventsApp(input: {
 }) {
   const app = new Hono();
 
+  function parseSlackPayload(rawBody: string): SlackEventEnvelope | null {
+    try {
+      return JSON.parse(rawBody) as SlackEventEnvelope;
+    } catch {
+      return null;
+    }
+  }
+
   function resolveSlackApp(inputValue: {
     apiAppId?: string;
     rawBody: string;
@@ -64,7 +72,7 @@ export function createSlackEventsApp(input: {
     timestamp: string;
   }) {
     const candidates = inputValue.apiAppId
-      ? input.slackApps.filter((candidate) => candidate.appId === inputValue.apiAppId)
+      ? input.slackApps.filter((candidate) => !candidate.appId || candidate.appId === inputValue.apiAppId)
       : input.slackApps;
     if (candidates.length === 0) {
       return { error: "unknown_slack_app" as const };
@@ -87,9 +95,12 @@ export function createSlackEventsApp(input: {
     if (!timestamp || !signature) {
       return c.json({ error: "missing_signature_headers" }, 401);
     }
-    const payload = JSON.parse(rawBody) as SlackEventEnvelope;
+    const payload = parseSlackPayload(rawBody);
+    if (!payload) {
+      return c.json({ error: "invalid_json" }, 400);
+    }
     const resolvedSlackApp = resolveSlackApp({
-      ...(payload.api_app_id ? { apiAppId: payload.api_app_id } : {}),
+      apiAppId: payload.api_app_id,
       rawBody,
       signature,
       timestamp
@@ -124,11 +135,11 @@ export function createSlackEventsApp(input: {
       ts: payload.event.ts,
       eventId: payload.event_id,
       eventTime: payload.event_time ?? Math.floor(Date.parse(input.now()) / 1000),
-      ...(payload.api_app_id ? { appId: payload.api_app_id } : {}),
+      appId: payload.api_app_id,
       agentId: slackApp.agentId,
-      ...(payload.event.thread_ts ? { threadTs: payload.event.thread_ts } : {}),
-      ...(payload.authorizations?.[0]?.user_id ? { botUserId: payload.authorizations[0].user_id } : {}),
-      ...(slackApp.callbackUri ? { callbackUri: slackApp.callbackUri } : {}),
+      threadTs: payload.event.thread_ts,
+      botUserId: payload.authorizations?.[0]?.user_id,
+      callbackUri: slackApp.callbackUri,
       binding
     });
     if (!event) {

@@ -25,8 +25,23 @@ type SlackAppConfig = {
 function slackAppsFromEnv(): SlackAppConfig[] {
   const appsJson = process.env.OPENTAG_SLACK_APPS_JSON;
   if (appsJson) {
-    const parsed = JSON.parse(appsJson) as SlackAppConfig[];
-    return parsed.filter((candidate) => candidate.signingSecret && candidate.agentId);
+    try {
+      const parsed = JSON.parse(appsJson);
+      if (!Array.isArray(parsed)) {
+        throw new Error("Value is not a JSON array");
+      }
+      return parsed.filter(
+        (candidate): candidate is SlackAppConfig =>
+          Boolean(candidate) &&
+          typeof candidate === "object" &&
+          typeof candidate.signingSecret === "string" &&
+          typeof candidate.agentId === "string"
+      );
+    } catch (error) {
+      throw new Error(
+        `Failed to parse OPENTAG_SLACK_APPS_JSON: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   if (!signingSecret) {
