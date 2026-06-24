@@ -45,6 +45,47 @@ describe("OpenTag repository", () => {
     expect(secondClaim).toBeNull();
   });
 
+  it("only lets the repo-bound runner claim a queued run", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.registerRunner({ runnerId: "runner_1", name: "Runner One" });
+    await repo.registerRunner({ runnerId: "runner_2", name: "Runner Two" });
+    await repo.createRepoBinding({
+      provider: "github",
+      owner: "acme",
+      repo: "demo",
+      runnerId: "runner_1",
+      workspacePath: "/Users/test/demo",
+      defaultExecutor: "echo"
+    });
+    await repo.createRun({
+      id: "run_bound",
+      event: {
+        id: "evt_bound",
+        source: "github",
+        sourceEventId: "comment_bound",
+        receivedAt: "2026-06-24T00:00:00.000Z",
+        actor: { provider: "github", providerUserId: "42", handle: "octocat" },
+        target: { mention: "@opentag", agentId: "opentag" },
+        command: { rawText: "fix this", intent: "fix", args: {} },
+        context: [],
+        permissions: [{ scope: "issue:comment", reason: "reply to source thread" }],
+        callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/1/comments" },
+        metadata: { owner: "acme", repo: "demo" }
+      }
+    });
+
+    await expect(repo.claimNextRun({ runnerId: "runner_2", leaseSeconds: 60 })).resolves.toBeNull();
+    const claimed = await repo.claimNextRun({ runnerId: "runner_1", leaseSeconds: 60 });
+    expect(claimed?.run.id).toBe("run_bound");
+
+    const binding = await repo.getRepoBinding({ provider: "github", owner: "acme", repo: "demo" });
+    expect(binding).toMatchObject({ runnerId: "runner_1", workspacePath: "/Users/test/demo", defaultExecutor: "echo" });
+  });
+
   it("records a completed result", async () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);

@@ -1,5 +1,5 @@
 import { OpenTagEventSchema, OpenTagRunResultSchema, type OpenTagEvent, type OpenTagRun, type OpenTagRunResult } from "@opentag/core";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { repoBindings, runEvents, runners, runs } from "./schema.js";
 
@@ -14,6 +14,15 @@ export type OpenTagAuditEvent = {
   type: string;
   payload: unknown;
   createdAt: string;
+};
+
+export type RepoBinding = {
+  provider: string;
+  owner: string;
+  repo: string;
+  runnerId: string;
+  workspacePath?: string;
+  defaultExecutor?: string;
 };
 
 function nowIso(): string {
@@ -31,6 +40,17 @@ function runFromRow(row: typeof runs.$inferSelect): OpenTagRun {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     ...(result ? { result } : {})
+  };
+}
+
+function repoKeyFromEvent(event: OpenTagEvent): { provider: string; owner: string; repo: string } | null {
+  const owner = event.metadata["owner"];
+  const repo = event.metadata["repo"];
+  if (typeof owner !== "string" || typeof repo !== "string") return null;
+  return {
+    provider: event.source,
+    owner,
+    repo
   };
 }
 
@@ -58,15 +78,22 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       repo: string;
       runnerId: string;
       workspacePath?: string;
+      defaultExecutor?: string;
     }): Promise<void> {
       await db
         .insert(repoBindings)
-        .values({ ...input, workspacePath: input.workspacePath ?? null, createdAt: nowIso() })
+        .values({
+          ...input,
+          workspacePath: input.workspacePath ?? null,
+          defaultExecutor: input.defaultExecutor ?? null,
+          createdAt: nowIso()
+        })
         .onConflictDoUpdate({
           target: [repoBindings.provider, repoBindings.owner, repoBindings.repo],
           set: {
             runnerId: input.runnerId,
-            workspacePath: input.workspacePath ?? null
+            workspacePath: input.workspacePath ?? null,
+            defaultExecutor: input.defaultExecutor ?? null
           }
         });
     },
@@ -98,7 +125,26 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
     },
 
     async claimNextRun(input: { runnerId: string; leaseSeconds: number }): Promise<ClaimedOpenTagRun | null> {
-      const row = await db.select().from(runs).where(eq(runs.status, "queued")).limit(1).get();
+      const queuedRows = await db.select().from(runs).where(eq(runs.status, "queued")).orderBy(asc(runs.createdAt));
+      const row = queuedRows.find((candidate) => {
+        const event = OpenTagEventSchema.parse(JSON.parse(candidate.eventJson));
+        const repoKey = repoKeyFromEvent(event);
+        if (!repoKey) return false;
+        const binding = db
+          .select()
+          .from(repoBindings)
+          .where(
+            and(
+              eq(repoBindings.provider, repoKey.provider),
+              eq(repoBindings.owner, repoKey.owner),
+              eq(repoBindings.repo, repoKey.repo),
+              eq(repoBindings.runnerId, input.runnerId)
+            )
+          )
+          .limit(1)
+          .get();
+        return Boolean(binding);
+      });
       if (!row) return null;
 
       const updatedAt = nowIso();
@@ -130,6 +176,26 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
           updatedAt
         },
         event: OpenTagEventSchema.parse(JSON.parse(row.eventJson))
+      };
+    },
+
+    async getRepoBinding(input: { provider: string; owner: string; repo: string }): Promise<RepoBinding | null> {
+      const row = await db
+        .select()
+        .from(repoBindings)
+        .where(
+          and(eq(repoBindings.provider, input.provider), eq(repoBindings.owner, input.owner), eq(repoBindings.repo, input.repo))
+        )
+        .limit(1)
+        .get();
+      if (!row) return null;
+      return {
+        provider: row.provider,
+        owner: row.owner,
+        repo: row.repo,
+        runnerId: row.runnerId,
+        ...(row.workspacePath ? { workspacePath: row.workspacePath } : {}),
+        ...(row.defaultExecutor ? { defaultExecutor: row.defaultExecutor } : {})
       };
     },
 

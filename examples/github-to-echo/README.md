@@ -21,15 +21,34 @@ This demo proves the OpenTag v0 loop without needing a real coding agent.
 OPENTAG_DATABASE_PATH=opentag.db pnpm --filter @opentag/dispatcher dev
 ```
 
-2. Register a runner:
+2. Create a local daemon config:
 
 ```bash
-curl -X POST http://localhost:3030/v1/runners \
-  -H 'content-type: application/json' \
-  -d '{"runnerId":"runner_local","name":"Local Runner"}'
+cat > opentag.local.json <<'JSON'
+{
+  "runnerId": "runner_local",
+  "dispatcherUrl": "http://localhost:3030",
+  "repositories": [
+    {
+      "provider": "github",
+      "owner": "acme",
+      "repo": "demo",
+      "checkoutPath": "/Users/example/repos/demo",
+      "defaultExecutor": "echo"
+    }
+  ]
+}
+JSON
 ```
 
-3. Create a run with a normalized event payload:
+3. Register the runner and bind its repository:
+
+```bash
+OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- register-runner
+OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- bind-repos
+```
+
+4. Create a run with a normalized event payload:
 
 ```bash
 curl -X POST http://localhost:3030/v1/runs \
@@ -59,16 +78,15 @@ curl -X POST http://localhost:3030/v1/runs \
   }'
 ```
 
-4. Run the daemon once:
+5. Run the daemon once:
 
 ```bash
-OPENTAG_RUNNER_ID=runner_local \
-OPENTAG_DISPATCHER_URL=http://localhost:3030 \
-pnpm --filter @opentag/opentagd dev -- run-once
+OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- run-once
 ```
 
-5. Inspect the stored run:
+6. Inspect the stored run and audit events:
 
 ```bash
 curl http://localhost:3030/v1/runs/run_demo_1
+curl http://localhost:3030/v1/runs/run_demo_1/events
 ```

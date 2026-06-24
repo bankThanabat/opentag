@@ -1,4 +1,5 @@
 import { OpenTagEventSchema, OpenTagRunSchema, type OpenTagEvent, type OpenTagRun } from "@opentag/core";
+import type { RepositoryBindingConfig } from "./config.js";
 import type { ClaimedRun, DaemonClient } from "./daemon.js";
 
 function assertOk(response: Response, action: string): void {
@@ -47,6 +48,37 @@ export function createDispatcherClient(input: { dispatcherUrl: string; runnerId:
         body: JSON.stringify({ result })
       });
       assertOk(response, "complete");
+    }
+  };
+}
+
+export function createDispatcherAdminClient(input: { dispatcherUrl: string; runnerId: string }) {
+  const baseUrl = input.dispatcherUrl.replace(/\/$/, "");
+
+  return {
+    async registerRunner(name = input.runnerId): Promise<void> {
+      const response = await fetch(`${baseUrl}/v1/runners`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runnerId: input.runnerId, name })
+      });
+      assertOk(response, "registerRunner");
+    },
+
+    async bindRepository(binding: RepositoryBindingConfig): Promise<void> {
+      const response = await fetch(`${baseUrl}/v1/repo-bindings`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: binding.provider,
+          owner: binding.owner,
+          repo: binding.repo,
+          runnerId: input.runnerId,
+          workspacePath: binding.checkoutPath,
+          defaultExecutor: binding.defaultExecutor
+        })
+      });
+      assertOk(response, "bindRepository");
     }
   };
 }

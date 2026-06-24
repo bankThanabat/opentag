@@ -45,6 +45,7 @@ export const repoBindings = sqliteTable(
     repo: text("repo").notNull(),
     runnerId: text("runner_id").notNull(),
     workspacePath: text("workspace_path"),
+    defaultExecutor: text("default_executor"),
     createdAt: text("created_at").notNull()
   },
   (table) => ({
@@ -88,9 +89,18 @@ export function migrateSchema(sqlite: Database.Database): void {
       repo TEXT NOT NULL,
       runner_id TEXT NOT NULL,
       workspace_path TEXT,
+      default_executor TEXT,
       created_at TEXT NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS repo_bindings_provider_owner_repo_idx
       ON repo_bindings(provider, owner, repo);
   `);
+  const columns = sqlite.prepare("PRAGMA table_info(repo_bindings)").all() as { name: string }[];
+  const columnNames = new Set(columns.map((column) => column.name));
+  if (!columnNames.has("workspace_path")) {
+    sqlite.exec("ALTER TABLE repo_bindings ADD COLUMN workspace_path TEXT");
+  }
+  if (!columnNames.has("default_executor")) {
+    sqlite.exec("ALTER TABLE repo_bindings ADD COLUMN default_executor TEXT");
+  }
 }

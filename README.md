@@ -19,6 +19,8 @@ The first implementation focuses on a narrow GitHub-to-local-runner loop:
 5. An executor adapter runs the task.
 6. OpenTag reports the result back to GitHub.
 
+The dispatcher only leases a run to a runner that is explicitly bound to the source repository, and the local daemon only executes runs whose repository is mapped to a configured local checkout.
+
 ## Packages
 
 - `packages/core`: protocol schemas and mention parsing.
@@ -36,6 +38,26 @@ pnpm install
 pnpm test
 pnpm build
 pnpm typecheck
+```
+
+## Local Runner Config
+
+`opentagd` can read a JSON config through `OPENTAG_CONFIG_PATH`:
+
+```json
+{
+  "runnerId": "runner_local",
+  "dispatcherUrl": "http://localhost:3030",
+  "repositories": [
+    {
+      "provider": "github",
+      "owner": "acme",
+      "repo": "demo",
+      "checkoutPath": "/Users/example/repos/demo",
+      "defaultExecutor": "echo"
+    }
+  ]
+}
 ```
 
 ## Design

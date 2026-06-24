@@ -26,6 +26,20 @@ describe("dispatcher API", () => {
     });
     expect(runnerResponse.status).toBe(201);
 
+    const bindingResponse = await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        workspacePath: "/Users/test/demo",
+        defaultExecutor: "echo"
+      })
+    });
+    expect(bindingResponse.status).toBe(201);
+
     const createResponse = await app.request("/v1/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -38,6 +52,10 @@ describe("dispatcher API", () => {
     const claimed = await claimResponse.json();
     expect(claimed.run.id).toBe("run_1");
     expect(claimed.event.command.rawText).toBe("fix this");
+
+    const bindingGetResponse = await app.request("/v1/repo-bindings/github/acme/demo");
+    const binding = await bindingGetResponse.json();
+    expect(binding.binding).toMatchObject({ runnerId: "runner_1", workspacePath: "/Users/test/demo" });
   });
 
   it("delivers acknowledgement, progress, and final callback messages with audit events", async () => {
@@ -55,6 +73,18 @@ describe("dispatcher API", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ runId: "run_2", event: { ...validEvent, id: "evt_2", sourceEventId: "comment_2" } })
+    });
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        workspacePath: "/Users/test/demo",
+        defaultExecutor: "echo"
+      })
     });
     await app.request("/v1/runs/run_2/progress", {
       method: "POST",

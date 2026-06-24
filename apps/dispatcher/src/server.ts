@@ -11,6 +11,15 @@ const CreateRunnerSchema = z.object({
   name: z.string().min(1)
 });
 
+const CreateRepoBindingSchema = z.object({
+  provider: z.string().min(1),
+  owner: z.string().min(1),
+  repo: z.string().min(1),
+  runnerId: z.string().min(1),
+  workspacePath: z.string().min(1).optional(),
+  defaultExecutor: z.string().min(1).optional()
+});
+
 const CreateRunSchema = z.object({
   runId: z.string().min(1),
   event: OpenTagEventSchema
@@ -70,6 +79,29 @@ export function createDispatcherApp(input: { databasePath: string; callbackSink?
     const parsed = CreateRunnerSchema.parse(await c.req.json());
     await repo.registerRunner(parsed);
     return c.json({ ok: true }, 201);
+  });
+
+  app.post("/v1/repo-bindings", async (c) => {
+    const parsed = CreateRepoBindingSchema.parse(await c.req.json());
+    await repo.createRepoBinding({
+      provider: parsed.provider,
+      owner: parsed.owner,
+      repo: parsed.repo,
+      runnerId: parsed.runnerId,
+      ...(parsed.workspacePath ? { workspacePath: parsed.workspacePath } : {}),
+      ...(parsed.defaultExecutor ? { defaultExecutor: parsed.defaultExecutor } : {})
+    });
+    return c.json({ ok: true }, 201);
+  });
+
+  app.get("/v1/repo-bindings/:provider/:owner/:repo", async (c) => {
+    const binding = await repo.getRepoBinding({
+      provider: c.req.param("provider"),
+      owner: c.req.param("owner"),
+      repo: c.req.param("repo")
+    });
+    if (!binding) return c.json({ error: "repo_binding_not_found" }, 404);
+    return c.json({ binding });
   });
 
   app.post("/v1/runs", async (c) => {
