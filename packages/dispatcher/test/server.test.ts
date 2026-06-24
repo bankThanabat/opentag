@@ -652,6 +652,89 @@ describe("dispatcher API", () => {
     expect(events.map((event: { type: string }) => event.type)).toContain("apply_plan.executed");
   });
 
+  it("does not persist apply plans when execution prerequisites fail", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        allowedActors: ["octocat"]
+      })
+    });
+    await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        runId: "run_apply_prevalidation",
+        event: {
+          ...validEvent,
+          id: "evt_apply_prevalidation",
+          sourceEventId: "comment_apply_prevalidation",
+          permissions: [...validEvent.permissions, { scope: "repo:write", reason: "mutate labels after approval" }],
+          metadata: { owner: "acme", repo: "demo", issueNumber: 9 }
+        }
+      })
+    });
+    await app.request("/v1/runs/run_apply_prevalidation/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        result: {
+          conclusion: "needs_human",
+          summary: "Prepared proposal.",
+          suggestedChanges: [
+            {
+              proposalId: "proposal_apply_prevalidation",
+              createdAt: "2026-06-24T00:00:01.000Z",
+              sourceRunId: "run_apply_prevalidation",
+              summary: "Add bug label.",
+              intents: [
+                {
+                  intentId: "intent_label_bug",
+                  domain: "labels",
+                  action: "add_label",
+                  summary: "Add the bug label.",
+                  params: { label: "bug" }
+                }
+              ]
+            }
+          ]
+        }
+      })
+    });
+    await app.request("/v1/proposals/proposal_apply_prevalidation/approvals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "approval_apply_prevalidation",
+        approvedIntentIds: ["intent_label_bug"],
+        approvedBy: { provider: "github", providerUserId: "42", handle: "octocat" },
+        approvedAt: "2026-06-24T00:00:02.000Z"
+      })
+    });
+
+    const applyResponse = await app.request("/v1/proposals/proposal_apply_prevalidation/apply-plans", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "apply_prevalidation",
+        approvalDecisionId: "approval_apply_prevalidation",
+        adapter: "github",
+        execute: true
+      })
+    });
+    expect(applyResponse.status).toBe(422);
+    await expect(applyResponse.json()).resolves.toEqual({ error: "github_apply_not_configured" });
+
+    const eventsResponse = await app.request("/v1/runs/run_apply_prevalidation/events");
+    const { events } = await eventsResponse.json();
+    expect(events.map((event: { type: string }) => event.type)).not.toContain("apply_plan.created");
+  });
+
   it("executes approved GitHub status intents through label mappings", async () => {
     const githubRequests: Array<{ url: string; method: string; body: unknown; authorization: string | null }> = [];
     const app = createDispatcherApp({

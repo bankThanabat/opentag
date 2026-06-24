@@ -51,6 +51,7 @@ describe("maybeCreatePullRequest", () => {
       result,
       options: {
         githubToken: "ghs_test",
+        allowAutoCreatePullRequest: true,
         commandRunner: {
           async run(command, args) {
             commands.push(`${command} ${args.join(" ")}`);
@@ -87,5 +88,27 @@ describe("maybeCreatePullRequest", () => {
         options: {}
       })
     ).resolves.toBe(result);
+  });
+
+  it("leaves the result unchanged unless auto PR creation is explicitly enabled", async () => {
+    const commands: string[] = [];
+    await expect(
+      maybeCreatePullRequest({
+        run,
+        event,
+        binding: { provider: "github", owner: "acme", repo: "demo", checkoutPath: "/tmp/demo" },
+        result,
+        options: {
+          githubToken: "ghs_test",
+          commandRunner: {
+            async run(command, args) {
+              commands.push(`${command} ${args.join(" ")}`);
+              return { exitCode: 0, stdout: "", stderr: "" };
+            }
+          }
+        }
+      })
+    ).resolves.toBe(result);
+    expect(commands).toEqual([]);
   });
 });

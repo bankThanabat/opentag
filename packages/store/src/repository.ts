@@ -422,11 +422,8 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
           createdAt
         })
         .onConflictDoUpdate({
-          target: repoPolicyRules.id,
+          target: [repoPolicyRules.provider, repoPolicyRules.owner, repoPolicyRules.repo, repoPolicyRules.id],
           set: {
-            provider: input.provider,
-            owner: input.owner,
-            repo: input.repo,
             ruleJson: JSON.stringify(rule),
             createdAt
           }
@@ -462,11 +459,8 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
           createdAt
         })
         .onConflictDoUpdate({
-          target: repoMutationMappings.id,
+          target: [repoMutationMappings.provider, repoMutationMappings.owner, repoMutationMappings.repo, repoMutationMappings.id],
           set: {
-            provider: input.provider,
-            owner: input.owner,
-            repo: input.repo,
             mappingJson: JSON.stringify(mapping),
             createdAt
           }
@@ -751,7 +745,14 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
     async completeRun(input: { runId: string; result: OpenTagRunResult }): Promise<void> {
       const result = OpenTagRunResultSchema.parse(input.result);
       const updatedAt = nowIso();
-      const status = result.conclusion === "success" ? "succeeded" : result.conclusion === "cancelled" ? "cancelled" : "failed";
+      const status =
+        result.conclusion === "success"
+          ? "succeeded"
+          : result.conclusion === "cancelled"
+            ? "cancelled"
+            : result.conclusion === "needs_human"
+              ? "needs_approval"
+              : "failed";
       const runRow = await db.select().from(runs).where(eq(runs.id, input.runId)).limit(1).get();
       const runThread = runRow ? protocolRunFieldsFromEvent(OpenTagEventSchema.parse(JSON.parse(runRow.eventJson)), runRow.createdAt).thread : undefined;
       await db.update(runs).set({ status, resultJson: JSON.stringify(result), updatedAt }).where(eq(runs.id, input.runId));

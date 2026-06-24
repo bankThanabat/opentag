@@ -468,14 +468,15 @@ export function createDispatcherApp(input: {
   app.post("/v1/proposals/:proposalId/apply-plans", async (c) => {
     const proposalId = c.req.param("proposalId");
     const body = ApplyPlanInputSchema.parse(await c.req.json());
-    const plan = await repo.createApplyPlan({
-      id: body.id ?? `apply_${proposalId}_${Date.now()}`,
-      proposalId,
-      approvalDecisionId: body.approvalDecisionId,
-      ...(body.selectedIntentIds?.length ? { selectedIntentIds: body.selectedIntentIds } : {}),
-      ...(body.adapter ? { adapter: body.adapter } : {})
-    });
-    if (!plan) return c.json({ error: "proposal_or_approval_not_found" }, 404);
+    let executableTarget:
+      | {
+          proposal: NonNullable<Awaited<ReturnType<typeof repo.getSuggestedChanges>>>;
+          owner: string;
+          repoName: string;
+          issueNumber: number;
+        }
+      | undefined;
+
     if (body.execute) {
       if (body.adapter !== "github") {
         return c.json({ error: "apply_execution_adapter_not_supported" }, 422);
@@ -493,16 +494,32 @@ export function createDispatcherApp(input: {
       if (typeof owner !== "string" || typeof repoName !== "string" || typeof issueNumber !== "number") {
         return c.json({ error: "github_issue_target_missing" }, 422);
       }
+      executableTarget = { proposal, owner, repoName, issueNumber };
+    }
+
+    const plan = await repo.createApplyPlan({
+      id: body.id ?? `apply_${proposalId}_${Date.now()}`,
+      proposalId,
+      approvalDecisionId: body.approvalDecisionId,
+      ...(body.selectedIntentIds?.length ? { selectedIntentIds: body.selectedIntentIds } : {}),
+      ...(body.adapter ? { adapter: body.adapter } : {})
+    });
+    if (!plan) return c.json({ error: "proposal_or_approval_not_found" }, 404);
+    if (body.execute && executableTarget) {
+      const githubApply = input.githubApply;
+      if (!githubApply) {
+        return c.json({ error: "github_apply_not_configured" }, 422);
+      }
       const preflightOutcomeByIntentId = new Map((plan.outcomes ?? []).map((outcome) => [outcome.intentId, outcome]));
-      const executableIntents = proposal.snapshot.intents.filter((intent) => {
+      const executableIntents = executableTarget.proposal.snapshot.intents.filter((intent) => {
         const outcome = preflightOutcomeByIntentId.get(intent.intentId);
         return outcome?.outcome === "skipped" && outcome.message?.startsWith("Preflight passed");
       });
       const target = {
-        token: input.githubApply.token,
-        owner,
-        repo: repoName,
-        issueNumber
+        token: githubApply.token,
+        owner: executableTarget.owner,
+        repo: executableTarget.repoName,
+        issueNumber: executableTarget.issueNumber
       };
       const executedOutcomes = [];
       const compilerRegistry = createAdapterMutationCompilerRegistry([
@@ -517,7 +534,7 @@ export function createDispatcherApp(input: {
           await applyGitHubIssueMutationOperation({
             target,
             operation: compilation.operation as GitHubIssueMutationOperation,
-            ...(input.githubApply.fetchImpl ? { fetchImpl: input.githubApply.fetchImpl } : {})
+            ...(githubApply.fetchImpl ? { fetchImpl: githubApply.fetchImpl } : {})
           })
         );
       }

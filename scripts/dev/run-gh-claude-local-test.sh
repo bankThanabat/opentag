@@ -66,6 +66,7 @@ cat > "$CONFIG_PATH" <<JSON
   "dispatcherUrl": "http://localhost:${OPENTAG_DISPATCHER_PORT}",
   "pairingToken": "${OPENTAG_PAIRING_TOKEN}",
   "githubToken": "${GITHUB_TOKEN}",
+  "allowAutoCreatePullRequest": ${OPENTAG_GH_CREATE_PR:-false},
   "pollIntervalMs": 1000,
   "heartbeatIntervalMs": 15000,
   "claudeCode": {

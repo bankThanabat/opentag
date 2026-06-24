@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const runs = sqliteTable(
   "runs",
@@ -91,23 +91,35 @@ export const repoBindings = sqliteTable(
   })
 );
 
-export const repoPolicyRules = sqliteTable("repo_policy_rules", {
-  id: text("id").primaryKey(),
-  provider: text("provider").notNull(),
-  owner: text("owner").notNull(),
-  repo: text("repo").notNull(),
-  ruleJson: text("rule_json").notNull(),
-  createdAt: text("created_at").notNull()
-});
+export const repoPolicyRules = sqliteTable(
+  "repo_policy_rules",
+  {
+    id: text("id").notNull(),
+    provider: text("provider").notNull(),
+    owner: text("owner").notNull(),
+    repo: text("repo").notNull(),
+    ruleJson: text("rule_json").notNull(),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.provider, table.owner, table.repo, table.id] })
+  })
+);
 
-export const repoMutationMappings = sqliteTable("repo_mutation_mappings", {
-  id: text("id").primaryKey(),
-  provider: text("provider").notNull(),
-  owner: text("owner").notNull(),
-  repo: text("repo").notNull(),
-  mappingJson: text("mapping_json").notNull(),
-  createdAt: text("created_at").notNull()
-});
+export const repoMutationMappings = sqliteTable(
+  "repo_mutation_mappings",
+  {
+    id: text("id").notNull(),
+    provider: text("provider").notNull(),
+    owner: text("owner").notNull(),
+    repo: text("repo").notNull(),
+    mappingJson: text("mapping_json").notNull(),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.provider, table.owner, table.repo, table.id] })
+  })
+);
 
 export const slackChannelBindings = sqliteTable(
   "slack_channel_bindings",
@@ -201,20 +213,22 @@ export function migrateSchema(sqlite: Database.Database): void {
     CREATE UNIQUE INDEX IF NOT EXISTS repo_bindings_provider_owner_repo_idx
       ON repo_bindings(provider, owner, repo);
     CREATE TABLE IF NOT EXISTS repo_policy_rules (
-      id TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
       provider TEXT NOT NULL,
       owner TEXT NOT NULL,
       repo TEXT NOT NULL,
       rule_json TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (provider, owner, repo, id)
     );
     CREATE TABLE IF NOT EXISTS repo_mutation_mappings (
-      id TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
       provider TEXT NOT NULL,
       owner TEXT NOT NULL,
       repo TEXT NOT NULL,
       mapping_json TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (provider, owner, repo, id)
     );
     CREATE TABLE IF NOT EXISTS slack_channel_bindings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

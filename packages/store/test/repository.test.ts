@@ -224,6 +224,50 @@ describe("OpenTag repository", () => {
     expect(events[2]).toMatchObject({ visibility: "audit", importance: "high", message: "done" });
   });
 
+  it("stores needs_human results as needs_approval", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.createRun({
+      id: "run_needs_human",
+      event: {
+        id: "evt_needs_human",
+        source: "github",
+        sourceEventId: "comment_needs_human",
+        receivedAt: "2026-06-24T00:00:00.000Z",
+        actor: { provider: "github", providerUserId: "42" },
+        target: { mention: "@opentag", agentId: "opentag" },
+        command: { rawText: "propose labels", intent: "run", args: {} },
+        context: [],
+        permissions: [{ scope: "issue:comment", reason: "reply to source thread" }],
+        callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/1/comments" },
+        metadata: { owner: "acme", repo: "demo", issueNumber: 1 }
+      }
+    });
+
+    await repo.completeRun({
+      runId: "run_needs_human",
+      result: {
+        conclusion: "needs_human",
+        summary: "Proposal ready.",
+        suggestedChanges: [
+          {
+            proposalId: "proposal_needs_human",
+            createdAt: "2026-06-24T00:00:01.000Z",
+            summary: "Add label.",
+            intents: [{ intentId: "intent_label", domain: "labels", action: "add_label", summary: "Add label.", params: { label: "bug" } }]
+          }
+        ]
+      }
+    });
+
+    await expect(repo.getRun({ runId: "run_needs_human" })).resolves.toMatchObject({
+      run: { status: "needs_approval", result: { conclusion: "needs_human" } }
+    });
+  });
+
   it("persists proposals, approvals, apply plans, and metric events", async () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);
@@ -375,6 +419,24 @@ describe("OpenTag repository", () => {
     await expect(repo.listRepoPolicyRules({ provider: "github", owner: "acme", repo: "demo" })).resolves.toEqual([
       expect.objectContaining({ id: "deny_labels_from_primary_anchor", effect: "deny" })
     ]);
+    await repo.upsertRepoPolicyRule({
+      provider: "github",
+      owner: "acme",
+      repo: "other",
+      rule: {
+        id: "deny_labels_from_primary_anchor",
+        scope: "primary_anchor_override",
+        effect: "allow",
+        capabilityId: "set_labels",
+        reason: "Different repo may reuse the same rule id."
+      }
+    });
+    await expect(repo.listRepoPolicyRules({ provider: "github", owner: "acme", repo: "demo" })).resolves.toEqual([
+      expect.objectContaining({ id: "deny_labels_from_primary_anchor", effect: "deny" })
+    ]);
+    await expect(repo.listRepoPolicyRules({ provider: "github", owner: "acme", repo: "other" })).resolves.toEqual([
+      expect.objectContaining({ id: "deny_labels_from_primary_anchor", effect: "allow" })
+    ]);
 
     await repo.createRun({
       id: "run_policy",
@@ -462,6 +524,21 @@ describe("OpenTag repository", () => {
     });
     await expect(repo.listRepoMutationMappings({ provider: "github", owner: "acme", repo: "demo" })).resolves.toEqual([
       expect.objectContaining({ id: "github_status_labels", domain: "status" })
+    ]);
+    await repo.upsertRepoMutationMapping({
+      provider: "github",
+      owner: "acme",
+      repo: "other",
+      mapping: {
+        id: "github_status_labels",
+        adapter: "github",
+        domain: "status",
+        strategy: "label",
+        values: { blocked: "other/blocked" }
+      }
+    });
+    await expect(repo.listRepoMutationMappings({ provider: "github", owner: "acme", repo: "demo" })).resolves.toEqual([
+      expect.objectContaining({ id: "github_status_labels", values: { blocked: "status/blocked" } })
     ]);
 
     await repo.createRun({

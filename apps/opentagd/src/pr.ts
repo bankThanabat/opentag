@@ -5,6 +5,7 @@ import type { RepositoryBindingConfig } from "./config.js";
 
 export type PullRequestOptions = {
   githubToken?: string;
+  allowAutoCreatePullRequest?: boolean;
   commandRunner?: CommandRunner;
   fetchImpl?: FetchLike;
 };
@@ -21,6 +22,7 @@ export async function maybeCreatePullRequest(input: {
   options: PullRequestOptions;
 }): Promise<OpenTagRunResult> {
   if (!input.options.githubToken) return input.result;
+  if (!input.options.allowAutoCreatePullRequest) return input.result;
   if (input.event.source !== "github") return input.result;
   if (!hasPermission(input.event, "pr:create")) return input.result;
   const changedFiles = input.result.changedFiles ?? [];

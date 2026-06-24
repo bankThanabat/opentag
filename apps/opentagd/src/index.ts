@@ -87,7 +87,8 @@ program
       repositories: config.repositories,
       executors: executorsFromConfig(config),
       pullRequestOptions: {
-        ...(config.githubToken ? { githubToken: config.githubToken } : {})
+        ...(config.githubToken ? { githubToken: config.githubToken } : {}),
+        ...(config.allowAutoCreatePullRequest !== undefined ? { allowAutoCreatePullRequest: config.allowAutoCreatePullRequest } : {})
       },
       ...(config.heartbeatIntervalMs ? { heartbeatIntervalMs: config.heartbeatIntervalMs } : {}),
       client: createDispatcherClient({
@@ -108,7 +109,16 @@ program
       runnerId: config.runnerId,
       repositories: config.repositories,
       executors: executorsFromConfig(config),
-      ...(config.githubToken ? { pullRequestOptions: { githubToken: config.githubToken } } : {}),
+      ...(config.githubToken
+        ? {
+            pullRequestOptions: {
+              githubToken: config.githubToken,
+              ...(config.allowAutoCreatePullRequest !== undefined
+                ? { allowAutoCreatePullRequest: config.allowAutoCreatePullRequest }
+                : {})
+            }
+          }
+        : {}),
       ...(config.heartbeatIntervalMs ? { heartbeatIntervalMs: config.heartbeatIntervalMs } : {}),
       ...(config.pollIntervalMs ? { pollIntervalMs: config.pollIntervalMs } : {}),
       client: createDispatcherClient({
