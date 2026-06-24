@@ -67,7 +67,14 @@ describe("maybeCreatePullRequest", () => {
     expect(commands).toEqual(["git push -u origin opentag/run_1"]);
     expect(requests).toEqual(["https://api.github.com/repos/acme/demo/pulls"]);
     expect(updated.createdPullRequestUrl).toBe("https://github.com/acme/demo/pull/1");
-    expect(updated.nextAction).toContain("https://github.com/acme/demo/pull/1");
+    expect(updated.artifacts?.at(-1)).toMatchObject({ kind: "pull_request", uri: "https://github.com/acme/demo/pull/1" });
+    expect(updated.nextAction).toMatchObject({
+      summary: "Review pull request: https://github.com/acme/demo/pull/1",
+      hint: {
+        kind: "request_review",
+        metadata: { pullRequestUrl: "https://github.com/acme/demo/pull/1" }
+      }
+    });
   });
 
   it("leaves the result unchanged without a GitHub token", async () => {

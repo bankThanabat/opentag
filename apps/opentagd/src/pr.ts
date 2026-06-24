@@ -53,7 +53,13 @@ export async function maybeCreatePullRequest(input: {
   return {
     ...input.result,
     createdPullRequestUrl: pullRequestUrl,
-    artifacts: [...(input.result.artifacts ?? []), { title: "Pull request", uri: pullRequestUrl }],
-    nextAction: `Review pull request: ${pullRequestUrl}`
+    artifacts: [...(input.result.artifacts ?? []), { kind: "pull_request", title: "Pull request", uri: pullRequestUrl }],
+    nextAction: {
+      summary: `Review pull request: ${pullRequestUrl}`,
+      hint: {
+        kind: "request_review",
+        metadata: { pullRequestUrl }
+      }
+    }
   };
 }

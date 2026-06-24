@@ -71,6 +71,23 @@ describe("Codex executor", () => {
     expect(events).toEqual(["executor.started", "executor.progress", "executor.progress", "executor.completed"]);
     expect(result.changedFiles).toEqual(["src/demo.ts", "test/demo.test.ts"]);
     expect(result.summary).toContain("Implemented the requested fix.");
+    expect(result.artifacts?.[0]).toMatchObject({ kind: "patch", title: "Run branch", uri: "opentag/run_1" });
+    expect(result.suggestedChanges?.[0]).toMatchObject({
+      proposalId: "proposal_run_1",
+      sourceRunId: "run_1",
+      intents: [
+        { intentId: "proposal_run_1_link_branch", domain: "artifact_links", action: "link_artifact" },
+        { intentId: "proposal_run_1_request_review", domain: "review", action: "request_review" }
+      ]
+    });
+    expect(result.nextAction).toMatchObject({
+      summary: "Review the local branch and explicitly create a pull request if the proposal is acceptable.",
+      hint: {
+        kind: "create_pull_request",
+        targetId: "proposal_run_1",
+        selectedIntentIds: ["proposal_run_1_link_branch", "proposal_run_1_request_review"]
+      }
+    });
   });
 
   it("refuses to run when the workspace has uncommitted changes", async () => {

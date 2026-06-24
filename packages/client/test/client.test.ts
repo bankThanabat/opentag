@@ -100,4 +100,81 @@ describe("@opentag/client", () => {
       'createRun failed: 403 {"error":"repo_not_bound"}'
     );
   });
+
+  it("calls proposal approval and apply-plan endpoints", async () => {
+    const requests: Array<{ url: string; body: unknown; authorization: string | null }> = [];
+    const client = createOpenTagClient({
+      dispatcherUrl: "http://dispatcher.test",
+      pairingToken: "pair_1",
+      fetchImpl: async (url, init) => {
+        requests.push({
+          url: String(url),
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+          authorization: new Headers(init?.headers).get("authorization")
+        });
+        if (String(url).endsWith("/approvals")) {
+          return jsonResponse({
+            decision: {
+              id: "approval_1",
+              proposalId: "proposal_1",
+              approvedIntentIds: ["intent_1"],
+              approvedBy: { provider: "github", providerUserId: "42" },
+              approvedAt: "2026-06-24T00:00:00.000Z",
+              scope: "manual"
+            }
+          }, 201);
+        }
+        return jsonResponse({
+          plan: {
+            id: "apply_1",
+            proposalId: "proposal_1",
+            approvalDecisionId: "approval_1",
+            selectedIntentIds: ["intent_1"],
+            mode: "preflight_then_per_intent",
+            outcomes: [{ intentId: "intent_1", outcome: "skipped" }]
+          }
+        }, 201);
+      }
+    });
+
+    await expect(
+      client.approveProposal({
+        proposalId: "proposal_1",
+        id: "approval_1",
+        approvedIntentIds: ["intent_1"],
+        approvedBy: { provider: "github", providerUserId: "42" },
+        approvedAt: "2026-06-24T00:00:00.000Z"
+      })
+    ).resolves.toMatchObject({ decision: { id: "approval_1" } });
+    await expect(
+      client.createApplyPlan({
+        proposalId: "proposal_1",
+        id: "apply_1",
+        approvalDecisionId: "approval_1",
+        adapter: "github"
+      })
+    ).resolves.toMatchObject({ plan: { id: "apply_1" } });
+
+    expect(requests).toEqual([
+      {
+        url: "http://dispatcher.test/v1/proposals/proposal_1/approvals",
+        authorization: "Bearer pair_1",
+        body: {
+          id: "approval_1",
+          approvedIntentIds: ["intent_1"],
+          approvedBy: { provider: "github", providerUserId: "42" },
+          approvedAt: "2026-06-24T00:00:00.000Z"
+        }
+      },
+      {
+        url: "http://dispatcher.test/v1/proposals/proposal_1/apply-plans",
+        authorization: "Bearer pair_1",
+        body: {
+          id: "apply_1",
+          approvalDecisionId: "approval_1",
+          adapter: "github"
+        }
+      }
+    ]);
+  });
 });

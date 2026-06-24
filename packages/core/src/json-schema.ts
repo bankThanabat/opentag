@@ -1,8 +1,50 @@
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { OpenTagEventSchema, OpenTagRunResultSchema, OpenTagRunSchema } from "./schema.js";
+import {
+  ActionHintSchema,
+  ApplyIntentOutcomeSchema,
+  ApplyPlanSchema,
+  ApprovalDecisionSchema,
+  ArtifactKindSchema,
+  CapabilityContractSchema,
+  CanonicalMutationDomainSchema,
+  ContextPacketSchema,
+  ConversationAnchorSchema,
+  MutationIntentSchema,
+  OpenTagEventSchema,
+  OpenTagRunResultSchema,
+  OpenTagRunSchema,
+  ProposalLineageSchema,
+  RunEventImportanceSchema,
+  RunEventSchema,
+  RunEventVisibilitySchema,
+  PolicyResolutionSchema,
+  SuggestedChangesSnapshotSchema,
+  SuccessMetricNameSchema,
+  WorkItemReferenceSchema,
+  WorkThreadSchema
+} from "./schema.js";
 
 export const OpenTagJsonSchemas = {
   OpenTagEvent: zodToJsonSchema(OpenTagEventSchema, "OpenTagEvent"),
   OpenTagRun: zodToJsonSchema(OpenTagRunSchema, "OpenTagRun"),
-  OpenTagRunResult: zodToJsonSchema(OpenTagRunResultSchema, "OpenTagRunResult")
+  OpenTagRunResult: zodToJsonSchema(OpenTagRunResultSchema, "OpenTagRunResult"),
+  WorkItemReference: zodToJsonSchema(WorkItemReferenceSchema, "WorkItemReference"),
+  ConversationAnchor: zodToJsonSchema(ConversationAnchorSchema, "ConversationAnchor"),
+  WorkThread: zodToJsonSchema(WorkThreadSchema, "WorkThread"),
+  ContextPacket: zodToJsonSchema(ContextPacketSchema, "ContextPacket"),
+  RunEventVisibility: zodToJsonSchema(RunEventVisibilitySchema, "RunEventVisibility"),
+  RunEventImportance: zodToJsonSchema(RunEventImportanceSchema, "RunEventImportance"),
+  RunEvent: zodToJsonSchema(RunEventSchema, "RunEvent"),
+  ArtifactKind: zodToJsonSchema(ArtifactKindSchema, "ArtifactKind"),
+  CapabilityContract: zodToJsonSchema(CapabilityContractSchema, "CapabilityContract"),
+  PolicyResolution: zodToJsonSchema(PolicyResolutionSchema, "PolicyResolution"),
+  ProposalLineage: zodToJsonSchema(ProposalLineageSchema, "ProposalLineage"),
+  SuccessMetricName: zodToJsonSchema(SuccessMetricNameSchema, "SuccessMetricName"),
+  ActionHint: zodToJsonSchema(ActionHintSchema, "ActionHint"),
+  CanonicalMutationDomain: zodToJsonSchema(CanonicalMutationDomainSchema, "CanonicalMutationDomain"),
+  MutationIntent: zodToJsonSchema(MutationIntentSchema, "MutationIntent"),
+  SuggestedChangesSnapshot: zodToJsonSchema(SuggestedChangesSnapshotSchema, "SuggestedChangesSnapshot"),
+  ApprovalDecision: zodToJsonSchema(ApprovalDecisionSchema, "ApprovalDecision"),
+  ApplyPlan: zodToJsonSchema(ApplyPlanSchema, "ApplyPlan"),
+  ApplyIntentOutcome: zodToJsonSchema(ApplyIntentOutcomeSchema, "ApplyIntentOutcome")
 } as const;

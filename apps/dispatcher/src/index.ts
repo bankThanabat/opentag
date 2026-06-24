@@ -26,6 +26,7 @@ serve({
   fetch: createDispatcherApp({
     databasePath,
     ...(process.env.OPENTAG_PAIRING_TOKEN ? { pairingToken: process.env.OPENTAG_PAIRING_TOKEN } : {}),
+    ...(process.env.OPENTAG_GITHUB_TOKEN ? { githubApply: { token: process.env.OPENTAG_GITHUB_TOKEN } } : {}),
     callbackSink: createCompositeCallbackSink([
       createGitHubCallbackSink({
         ...(process.env.OPENTAG_GITHUB_TOKEN ? { token: process.env.OPENTAG_GITHUB_TOKEN } : {})

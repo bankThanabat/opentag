@@ -11,6 +11,10 @@ export const runs = sqliteTable(
     resultJson: text("result_json"),
     assignedRunnerId: text("assigned_runner_id"),
     executor: text("executor"),
+    parentRunId: text("parent_run_id"),
+    triggeredByActionJson: text("triggered_by_action_json"),
+    sourceProposalId: text("source_proposal_id"),
+    sourceApplyPlanId: text("source_apply_plan_id"),
     leasedAt: text("leased_at"),
     leaseExpiresAt: text("lease_expires_at"),
     heartbeatAt: text("heartbeat_at"),
@@ -27,7 +31,32 @@ export const runEvents = sqliteTable("run_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   runId: text("run_id").notNull(),
   type: text("type").notNull(),
+  visibility: text("visibility").notNull().default("audit"),
+  importance: text("importance").notNull().default("normal"),
+  message: text("message"),
   payloadJson: text("payload_json").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
+export const suggestedChanges = sqliteTable("suggested_changes", {
+  proposalId: text("proposal_id").primaryKey(),
+  runId: text("run_id").notNull(),
+  snapshotJson: text("snapshot_json").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
+export const approvalDecisions = sqliteTable("approval_decisions", {
+  id: text("id").primaryKey(),
+  proposalId: text("proposal_id").notNull(),
+  decisionJson: text("decision_json").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
+export const applyPlans = sqliteTable("apply_plans", {
+  id: text("id").primaryKey(),
+  proposalId: text("proposal_id").notNull(),
+  approvalDecisionId: text("approval_decision_id").notNull(),
+  planJson: text("plan_json").notNull(),
   createdAt: text("created_at").notNull()
 });
 
@@ -81,6 +110,10 @@ export function migrateSchema(sqlite: Database.Database): void {
       result_json TEXT,
       assigned_runner_id TEXT,
       executor TEXT,
+      parent_run_id TEXT,
+      triggered_by_action_json TEXT,
+      source_proposal_id TEXT,
+      source_apply_plan_id TEXT,
       leased_at TEXT,
       lease_expires_at TEXT,
       heartbeat_at TEXT,
@@ -93,7 +126,29 @@ export function migrateSchema(sqlite: Database.Database): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL,
       type TEXT NOT NULL,
+      visibility TEXT NOT NULL DEFAULT 'audit',
+      importance TEXT NOT NULL DEFAULT 'normal',
+      message TEXT,
       payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS suggested_changes (
+      proposal_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS approval_decisions (
+      id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL,
+      decision_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS apply_plans (
+      id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL,
+      approval_decision_id TEXT NOT NULL,
+      plan_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS runners (
@@ -144,5 +199,28 @@ export function migrateSchema(sqlite: Database.Database): void {
   }
   if (!runColumnNames.has("heartbeat_at")) {
     sqlite.exec("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT");
+  }
+  if (!runColumnNames.has("parent_run_id")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN parent_run_id TEXT");
+  }
+  if (!runColumnNames.has("triggered_by_action_json")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN triggered_by_action_json TEXT");
+  }
+  if (!runColumnNames.has("source_proposal_id")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN source_proposal_id TEXT");
+  }
+  if (!runColumnNames.has("source_apply_plan_id")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN source_apply_plan_id TEXT");
+  }
+  const runEventColumns = sqlite.prepare("PRAGMA table_info(run_events)").all() as { name: string }[];
+  const runEventColumnNames = new Set(runEventColumns.map((column) => column.name));
+  if (!runEventColumnNames.has("visibility")) {
+    sqlite.exec("ALTER TABLE run_events ADD COLUMN visibility TEXT NOT NULL DEFAULT 'audit'");
+  }
+  if (!runEventColumnNames.has("importance")) {
+    sqlite.exec("ALTER TABLE run_events ADD COLUMN importance TEXT NOT NULL DEFAULT 'normal'");
+  }
+  if (!runEventColumnNames.has("message")) {
+    sqlite.exec("ALTER TABLE run_events ADD COLUMN message TEXT");
   }
 }

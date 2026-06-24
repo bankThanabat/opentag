@@ -1,0 +1,120 @@
+import { describe, expect, it } from "vitest";
+import { contextPacketFromEvent, preflightMutationIntent, protocolRunFieldsFromEvent, workThreadFromEvent } from "../src/protocol.js";
+import type { OpenTagEvent } from "../src/schema.js";
+
+const githubEvent: OpenTagEvent = {
+  id: "evt_github_comment_1",
+  source: "github",
+  sourceEventId: "comment_1",
+  receivedAt: "2026-06-24T00:00:00.000Z",
+  actor: { provider: "github", providerUserId: "42", handle: "octocat" },
+  target: { mention: "@opentag", agentId: "opentag" },
+  command: { rawText: "fix the flaky test", intent: "fix", args: {} },
+  context: [
+    { kind: "github.issue", uri: "https://github.com/acme/demo/issues/7", visibility: "public" },
+    { kind: "github.comment", uri: "https://github.com/acme/demo/issues/7#issuecomment-1", visibility: "public" }
+  ],
+  permissions: [
+    { scope: "issue:comment", reason: "reply to source thread" },
+    { scope: "repo:write", reason: "commit on isolated branch" },
+    { scope: "pr:create", reason: "open a pull request" }
+  ],
+  callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/7/comments", threadKey: "acme/demo" },
+  metadata: { owner: "acme", repo: "demo", issueNumber: 7 }
+};
+
+describe("protocol helpers", () => {
+  it("derives a work thread for a canonical GitHub issue event", () => {
+    const thread = workThreadFromEvent(githubEvent);
+
+    expect(thread).toMatchObject({
+      workItemReference: {
+        provider: "github",
+        kind: "issue",
+        externalId: "acme/demo#7"
+      },
+      primaryAnchor: {
+        provider: "github",
+        controlPlane: true,
+        canApprove: true
+      }
+    });
+  });
+
+  it("does not invent a canonical work item when only a Slack thread is known", () => {
+    const slackEvent: OpenTagEvent = {
+      ...githubEvent,
+      id: "evt_slack_1",
+      source: "slack",
+      sourceEventId: "Ev123",
+      actor: { provider: "slack", providerUserId: "U123", handle: "U123", organizationId: "T123" },
+      context: [
+        { kind: "url", uri: "slack://team/T123/channel/C123/message/1710000000.000100", visibility: "organization" },
+        { kind: "text", uri: "<@U999> fix this", visibility: "organization" }
+      ],
+      permissions: [{ scope: "chat:postMessage", reason: "reply in Slack thread" }],
+      callback: {
+        provider: "slack",
+        uri: "https://slack.com/api/chat.postMessage",
+        threadKey: "T123|C123|1710000000.000100"
+      },
+      metadata: { owner: "acme", repo: "demo", repoProvider: "github" }
+    };
+
+    expect(workThreadFromEvent(slackEvent)).toBeUndefined();
+    expect(protocolRunFieldsFromEvent(slackEvent)).toMatchObject({
+      contextPacket: {
+        summary: "fix the flaky test"
+      }
+    });
+  });
+
+  it("builds a context packet with assembly metadata and write-scope risk", () => {
+    const packet = contextPacketFromEvent(githubEvent);
+
+    expect(packet.sourcePointers).toHaveLength(2);
+    expect(packet.assembly?.stages).toEqual(["collect", "classify", "filter", "preserve", "summarize", "budget", "emit"]);
+    expect(packet.risks?.[0]).toContain("repo:write");
+    expect(packet.exclusions?.[0]).toContain("explicit capability");
+  });
+
+  it("preflights mutation intents through platform permission and OpenTag policy", () => {
+    const intent = {
+      intentId: "intent_label_1",
+      domain: "labels" as const,
+      action: "add_label",
+      summary: "Add the bug label.",
+      params: { label: "bug" }
+    };
+
+    const denied = preflightMutationIntent({
+      intent,
+      permissions: githubEvent.permissions,
+      policyRules: []
+    });
+    expect(denied.outcome).toMatchObject({
+      intentId: "intent_label_1",
+      outcome: "unsupported"
+    });
+    expect(denied.outcome.message).toContain("policy denied");
+
+    const allowed = preflightMutationIntent({
+      intent,
+      permissions: githubEvent.permissions,
+      policyRules: [
+        {
+          id: "manual_approval",
+          scope: "primary_anchor_override",
+          effect: "allow",
+          capabilityId: "set_labels",
+          reason: "Manual approval selected this label intent."
+        }
+      ]
+    });
+    expect(allowed.policyResolution?.decision).toBe("allow");
+    expect(allowed.outcome).toMatchObject({
+      intentId: "intent_label_1",
+      outcome: "skipped"
+    });
+  });
+});

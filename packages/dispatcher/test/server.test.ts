@@ -133,12 +133,26 @@ describe("dispatcher API", () => {
     const { events } = await eventsResponse.json();
     expect(events.map((event: { type: string }) => event.type)).toEqual([
       "run.created",
+      "context_packet.generated",
       "callback.acknowledgement.delivered",
       "run.progress",
       "callback.progress.delivered",
       "run.completed",
       "callback.final.delivered"
     ]);
+    expect(events.find((event: { type: string }) => event.type === "run.progress")).toMatchObject({
+      visibility: "audit",
+      importance: "normal",
+      message: "running tests"
+    });
+    expect(events.find((event: { type: string }) => event.type === "context_packet.generated")).toMatchObject({
+      visibility: "audit",
+      importance: "normal"
+    });
+    expect(events.find((event: { type: string }) => event.type === "callback.final.delivered")).toMatchObject({
+      visibility: "human",
+      importance: "high"
+    });
   });
 
   it("renders Slack callbacks with Slack mrkdwn and keeps progress audit-only", async () => {
@@ -236,11 +250,321 @@ describe("dispatcher API", () => {
     const { events } = await eventsResponse.json();
     expect(events.map((event: { type: string }) => event.type)).toEqual([
       "run.created",
+      "context_packet.generated",
       "callback.acknowledgement.delivered",
       "run.progress",
       "run.completed",
       "callback.final.delivered"
     ]);
+    expect(events.find((event: { type: string }) => event.type === "run.progress")).toMatchObject({
+      visibility: "audit",
+      importance: "normal",
+      message: "Echo executor started"
+    });
+  });
+
+  it("records proposal approval decisions and creates apply plans", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        allowedActors: ["octocat"]
+      })
+    });
+
+    const event = {
+      ...validEvent,
+      id: "evt_protocol",
+      sourceEventId: "comment_protocol",
+      permissions: [
+        ...validEvent.permissions,
+        { scope: "repo:write", reason: "mutate labels after approval" }
+      ],
+      metadata: { owner: "acme", repo: "demo", issueNumber: 2 }
+    };
+    const createResponse = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_protocol", event })
+    });
+    expect(createResponse.status).toBe(201);
+
+    await app.request("/v1/runs/run_protocol/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        result: {
+          conclusion: "needs_human",
+          summary: "Prepared proposal.",
+          suggestedChanges: [
+            {
+              proposalId: "proposal_protocol",
+              createdAt: "2026-06-24T00:00:01.000Z",
+              sourceRunId: "run_protocol",
+              summary: "Add bug label.",
+              intents: [
+                {
+                  intentId: "intent_label_bug",
+                  domain: "labels",
+                  action: "add_label",
+                  summary: "Add the bug label.",
+                  params: { label: "bug" }
+                }
+              ]
+            }
+          ]
+        }
+      })
+    });
+
+    const proposalResponse = await app.request("/v1/proposals/proposal_protocol");
+    expect(proposalResponse.status).toBe(200);
+    await expect(proposalResponse.json()).resolves.toMatchObject({
+      runId: "run_protocol",
+      snapshot: { proposalId: "proposal_protocol" }
+    });
+    const lineageResponse = await app.request("/v1/proposals/proposal_protocol/lineage");
+    expect(lineageResponse.status).toBe(200);
+    await expect(lineageResponse.json()).resolves.toMatchObject({
+      lineage: {
+        entries: [{ proposalId: "proposal_protocol", intentId: "intent_label_bug", status: "current" }]
+      }
+    });
+    const currentIntentsResponse = await app.request("/v1/proposals/proposal_protocol/current-intents");
+    expect(currentIntentsResponse.status).toBe(200);
+    await expect(currentIntentsResponse.json()).resolves.toMatchObject({
+      intents: [{ intentId: "intent_label_bug", status: "current" }]
+    });
+
+    const approvalResponse = await app.request("/v1/proposals/proposal_protocol/approvals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "approval_protocol",
+        approvedIntentIds: ["intent_label_bug"],
+        approvedBy: { provider: "github", providerUserId: "42", handle: "octocat" },
+        approvedAt: "2026-06-24T00:00:02.000Z"
+      })
+    });
+    expect(approvalResponse.status).toBe(201);
+
+    const applyResponse = await app.request("/v1/proposals/proposal_protocol/apply-plans", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "apply_protocol",
+        approvalDecisionId: "approval_protocol",
+        adapter: "github"
+      })
+    });
+    expect(applyResponse.status).toBe(201);
+    await expect(applyResponse.json()).resolves.toMatchObject({
+      plan: {
+        id: "apply_protocol",
+        outcomes: [{ intentId: "intent_label_bug", outcome: "skipped" }]
+      }
+    });
+
+    const eventsResponse = await app.request("/v1/runs/run_protocol/events");
+    const { events } = await eventsResponse.json();
+    expect(events.map((event: { type: string }) => event.type)).toEqual(
+      expect.arrayContaining(["proposal.snapshot.created", "approval.decision.recorded", "apply_plan.created"])
+    );
+  });
+
+  it("creates child runs from next action hints with lineage fields", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1"
+      })
+    });
+    await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_parent", event: { ...validEvent, id: "evt_parent", sourceEventId: "comment_parent" } })
+    });
+
+    const childResponse = await app.request("/v1/runs/run_parent/child-runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        runId: "run_child",
+        action: {
+          kind: "apply_suggested_changes",
+          targetId: "proposal_parent",
+          selectedIntentIds: ["intent_label_bug"]
+        },
+        commandText: "Apply approved label change"
+      })
+    });
+    expect(childResponse.status).toBe(201);
+    await expect(childResponse.json()).resolves.toMatchObject({
+      run: {
+        id: "run_child",
+        parentRunId: "run_parent",
+        sourceProposalId: "proposal_parent",
+        triggeredByAction: {
+          kind: "apply_suggested_changes",
+          targetId: "proposal_parent"
+        }
+      }
+    });
+
+    const claimedResponse = await app.request("/v1/runners/runner_1/claim", { method: "POST" });
+    const claimed = await claimedResponse.json();
+    expect(claimed.run.id).toBe("run_parent");
+
+    const parentEventsResponse = await app.request("/v1/runs/run_parent/events");
+    const { events } = await parentEventsResponse.json();
+    expect(events.map((event: { type: string }) => event.type)).toContain("run.child_created");
+  });
+
+  it("executes approved GitHub label and assignee apply plans when explicitly requested", async () => {
+    const githubRequests: Array<{ url: string; method: string; body: unknown; authorization: string | null }> = [];
+    const app = createDispatcherApp({
+      databasePath: ":memory:",
+      githubApply: {
+        token: "ghs_test",
+        fetchImpl: (async (url, init) => {
+          githubRequests.push({
+            url: String(url),
+            method: init?.method ?? "GET",
+            body: init?.body ? JSON.parse(String(init.body)) : undefined,
+            authorization: new Headers(init?.headers).get("authorization")
+          });
+          return Response.json({});
+        }) as typeof fetch
+      }
+    });
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        allowedActors: ["octocat"]
+      })
+    });
+
+    const event = {
+      ...validEvent,
+      id: "evt_execute",
+      sourceEventId: "comment_execute",
+      permissions: [...validEvent.permissions, { scope: "repo:write", reason: "mutate issue fields after approval" }],
+      metadata: { owner: "acme", repo: "demo", issueNumber: 7 }
+    };
+    await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_execute", event })
+    });
+    await app.request("/v1/runs/run_execute/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        result: {
+          conclusion: "needs_human",
+          summary: "Prepared proposal.",
+          suggestedChanges: [
+            {
+              proposalId: "proposal_execute",
+              createdAt: "2026-06-24T00:00:01.000Z",
+              sourceRunId: "run_execute",
+              summary: "Add bug label and assign owner.",
+              intents: [
+                {
+                  intentId: "intent_label_bug",
+                  domain: "labels",
+                  action: "add_label",
+                  summary: "Add the bug label.",
+                  params: { label: "bug" }
+                },
+                {
+                  intentId: "intent_assignee_alice",
+                  domain: "assignee",
+                  action: "set_assignee",
+                  summary: "Assign the issue to Alice.",
+                  params: { assignee: "alice" }
+                }
+              ]
+            }
+          ]
+        }
+      })
+    });
+    await app.request("/v1/proposals/proposal_execute/approvals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "approval_execute",
+        approvedIntentIds: ["intent_label_bug", "intent_assignee_alice"],
+        approvedBy: { provider: "github", providerUserId: "42", handle: "octocat" },
+        approvedAt: "2026-06-24T00:00:02.000Z"
+      })
+    });
+
+    const applyResponse = await app.request("/v1/proposals/proposal_execute/apply-plans", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "apply_execute",
+        approvalDecisionId: "approval_execute",
+        adapter: "github",
+        execute: true
+      })
+    });
+    expect(applyResponse.status).toBe(201);
+    await expect(applyResponse.json()).resolves.toMatchObject({
+      plan: {
+        id: "apply_execute",
+        outcomes: [
+          { intentId: "intent_label_bug", outcome: "applied", externalUri: "https://github.com/acme/demo/issues/7" },
+          { intentId: "intent_assignee_alice", outcome: "applied", externalUri: "https://github.com/acme/demo/issues/7" }
+        ]
+      }
+    });
+    expect(githubRequests).toEqual([
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/7/labels",
+        method: "POST",
+        authorization: "Bearer ghs_test",
+        body: { labels: ["bug"] }
+      },
+      {
+        url: "https://api.github.com/repos/acme/demo/issues/7",
+        method: "PATCH",
+        authorization: "Bearer ghs_test",
+        body: { assignees: ["alice"] }
+      }
+    ]);
+
+    const storedPlanResponse = await app.request("/v1/apply-plans/apply_execute");
+    await expect(storedPlanResponse.json()).resolves.toMatchObject({
+      plan: {
+        adapterPlan: { externalWritesExecuted: true },
+        outcomes: [
+          { intentId: "intent_label_bug", outcome: "applied" },
+          { intentId: "intent_assignee_alice", outcome: "applied" }
+        ]
+      }
+    });
+
+    const eventsResponse = await app.request("/v1/runs/run_execute/events");
+    const { events } = await eventsResponse.json();
+    expect(events.map((event: { type: string }) => event.type)).toContain("apply_plan.executed");
   });
 
   it("adds a stable statusMessageKey when progress callbacks are delivered", async () => {

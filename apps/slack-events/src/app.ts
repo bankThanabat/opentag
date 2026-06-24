@@ -100,10 +100,10 @@ export function createSlackEventsApp(input: {
       return c.json({ error: "invalid_json" }, 400);
     }
     const resolvedSlackApp = resolveSlackApp({
-      apiAppId: payload.api_app_id,
       rawBody,
       signature,
-      timestamp
+      timestamp,
+      ...(payload.api_app_id ? { apiAppId: payload.api_app_id } : {})
     });
     if ("error" in resolvedSlackApp) {
       return c.json({ error: resolvedSlackApp.error }, 401);
@@ -135,12 +135,12 @@ export function createSlackEventsApp(input: {
       ts: payload.event.ts,
       eventId: payload.event_id,
       eventTime: payload.event_time ?? Math.floor(Date.parse(input.now()) / 1000),
-      appId: payload.api_app_id,
       agentId: slackApp.agentId,
-      threadTs: payload.event.thread_ts,
-      botUserId: payload.authorizations?.[0]?.user_id,
-      callbackUri: slackApp.callbackUri,
-      binding
+      binding,
+      ...(payload.api_app_id ? { appId: payload.api_app_id } : {}),
+      ...(payload.event.thread_ts ? { threadTs: payload.event.thread_ts } : {}),
+      ...(payload.authorizations?.[0]?.user_id ? { botUserId: payload.authorizations[0].user_id } : {}),
+      ...(slackApp.callbackUri ? { callbackUri: slackApp.callbackUri } : {})
     });
     if (!event) {
       return c.json({ ok: true, ignored: "empty_command" });

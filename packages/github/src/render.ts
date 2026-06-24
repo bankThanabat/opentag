@@ -1,5 +1,11 @@
 import type { OpenTagRunResult } from "@opentag/core";
 
+function nextActionSummary(result: OpenTagRunResult): string | undefined {
+  if (!result.nextAction) return undefined;
+  if (typeof result.nextAction === "string") return result.nextAction;
+  return result.nextAction.summary;
+}
+
 export function renderAcknowledgement(runId: string): string {
   return `OpenTag picked this up. Run: \`${runId}\``;
 }
@@ -18,8 +24,9 @@ export function renderFinalResult(result: OpenTagRunResult): string {
     }
   }
 
-  if (result.nextAction) {
-    lines.push("", `Next action: ${result.nextAction}`);
+  const nextAction = nextActionSummary(result);
+  if (nextAction) {
+    lines.push("", `Next action: ${nextAction}`);
   }
 
   return lines.join("\n");

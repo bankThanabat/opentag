@@ -32,13 +32,15 @@ describe("OpenTag repository", () => {
         context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }],
         permissions: [{ scope: "issue:comment", reason: "reply to source thread" }],
         callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/1/comments" },
-        metadata: { owner: "acme", repo: "demo" }
+        metadata: { owner: "acme", repo: "demo", issueNumber: 1 }
       }
     });
 
     const claimed = await repo.claimNextRun({ runnerId: "runner_1", leaseSeconds: 60 });
     expect(claimed?.run.id).toBe("run_1");
     expect(claimed?.run.status).toBe("assigned");
+    expect(claimed?.run.thread?.workItemReference).toMatchObject({ provider: "github", kind: "issue", externalId: "acme/demo#1" });
+    expect(claimed?.run.contextPacket?.summary).toBe("fix this");
     expect(claimed?.event.command.rawText).toBe("fix this");
 
     const secondClaim = await repo.claimNextRun({ runnerId: "runner_1", leaseSeconds: 60 });
@@ -123,6 +125,7 @@ describe("OpenTag repository", () => {
     expect(events.map((event) => event.type)).toContain("run.heartbeat");
     const heartbeatEvent = events.find((event) => event.type === "run.heartbeat");
     expect(heartbeatEvent?.payload).toMatchObject({ runnerId: "runner_1" });
+    expect(heartbeatEvent).toMatchObject({ visibility: "debug", importance: "low" });
   });
 
   it("requeues runs whose lease has expired", async () => {
@@ -212,8 +215,212 @@ describe("OpenTag repository", () => {
     const stored = await repo.getRun({ runId: "run_2" });
     expect(stored?.run.status).toBe("succeeded");
     expect(stored?.run.result?.summary).toBe("done");
+    expect(stored?.run.contextPacket?.assembly?.stages).toContain("emit");
 
     const events = await repo.listRunEvents({ runId: "run_2" });
-    expect(events.map((event) => event.type)).toEqual(["run.created", "run.completed"]);
+    expect(events.map((event) => event.type)).toEqual(["run.created", "context_packet.generated", "run.completed"]);
+    expect(events[0]).toMatchObject({ visibility: "audit", importance: "low" });
+    expect(events[1]).toMatchObject({ visibility: "audit", importance: "normal", message: "run echo" });
+    expect(events[2]).toMatchObject({ visibility: "audit", importance: "high", message: "done" });
+  });
+
+  it("persists proposals, approvals, apply plans, and metric events", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.createRun({
+      id: "run_protocol",
+      event: {
+        id: "evt_protocol",
+        source: "github",
+        sourceEventId: "comment_protocol",
+        receivedAt: "2026-06-24T00:00:00.000Z",
+        actor: { provider: "github", providerUserId: "42", handle: "octocat" },
+        target: { mention: "@opentag", agentId: "opentag" },
+        command: { rawText: "label this bug", intent: "run", args: {} },
+        context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/2", visibility: "public" }],
+        permissions: [
+          { scope: "issue:comment", reason: "reply to source thread" },
+          { scope: "repo:write", reason: "mutate issue labels after approval" }
+        ],
+        callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/2/comments" },
+        metadata: { owner: "acme", repo: "demo", issueNumber: 2 }
+      }
+    });
+
+    await repo.completeRun({
+      runId: "run_protocol",
+      result: {
+        conclusion: "needs_human",
+        summary: "Prepared label proposal.",
+        suggestedChanges: [
+          {
+            proposalId: "proposal_protocol",
+            createdAt: "2026-06-24T00:00:01.000Z",
+            sourceRunId: "run_protocol",
+            summary: "Add bug label.",
+            intents: [
+              {
+                intentId: "intent_label_bug",
+                domain: "labels",
+                action: "add_label",
+                summary: "Add the bug label.",
+                params: { label: "bug" }
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const storedProposal = await repo.getSuggestedChanges({ proposalId: "proposal_protocol" });
+    expect(storedProposal?.snapshot.intents[0]?.intentId).toBe("intent_label_bug");
+
+    const decision = await repo.recordApprovalDecision({
+      id: "approval_protocol",
+      proposalId: "proposal_protocol",
+      approvedIntentIds: ["intent_label_bug"],
+      approvedBy: { provider: "github", providerUserId: "42", handle: "octocat" },
+      approvedAt: "2026-06-24T00:00:02.000Z",
+      scope: "manual"
+    });
+    expect(decision?.approvedIntentIds).toEqual(["intent_label_bug"]);
+
+    const plan = await repo.createApplyPlan({
+      id: "apply_protocol",
+      proposalId: "proposal_protocol",
+      approvalDecisionId: "approval_protocol",
+      adapter: "github"
+    });
+    expect(plan).toMatchObject({
+      id: "apply_protocol",
+      proposalId: "proposal_protocol",
+      mode: "preflight_then_per_intent",
+      outcomes: [{ intentId: "intent_label_bug", outcome: "skipped" }]
+    });
+    expect(plan?.outcomes?.[0]?.message).toContain("adapter execution is not implemented");
+
+    await expect(repo.getApprovalDecision({ id: "approval_protocol" })).resolves.toMatchObject({ id: "approval_protocol" });
+    await expect(repo.getApplyPlan({ id: "apply_protocol" })).resolves.toMatchObject({ id: "apply_protocol" });
+
+    const events = await repo.listRunEvents({ runId: "run_protocol" });
+    expect(events.map((event) => event.type)).toContain("proposal.snapshot.created");
+    expect(events.map((event) => event.type)).toContain("approval.decision.recorded");
+    expect(events.map((event) => event.type)).toContain("apply_plan.created");
+    expect(events.filter((event) => event.type === "success_metric.observed").map((event) => event.payload)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ metric: "time_to_first_useful_artifact" }),
+        expect.objectContaining({ metric: "external_write_approval_rate" })
+      ])
+    );
+  });
+
+  it("computes domain-scoped proposal supersession", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    const baseEvent = {
+      id: "evt_lineage_1",
+      source: "github" as const,
+      sourceEventId: "comment_lineage_1",
+      receivedAt: "2026-06-24T00:00:00.000Z",
+      actor: { provider: "github" as const, providerUserId: "42", handle: "octocat" },
+      target: { mention: "@opentag", agentId: "opentag" },
+      command: { rawText: "triage this", intent: "run" as const, args: {} },
+      context: [{ kind: "github.issue" as const, uri: "https://github.com/acme/demo/issues/3", visibility: "public" as const }],
+      permissions: [
+        { scope: "issue:comment" as const, reason: "reply to source thread" },
+        { scope: "repo:write" as const, reason: "mutate issue metadata after approval" }
+      ],
+      callback: { provider: "github" as const, uri: "https://api.github.com/repos/acme/demo/issues/3/comments" },
+      metadata: { owner: "acme", repo: "demo", issueNumber: 3 }
+    };
+
+    await repo.createRun({ id: "run_lineage_1", event: baseEvent });
+    await repo.completeRun({
+      runId: "run_lineage_1",
+      result: {
+        conclusion: "needs_human",
+        summary: "Prepared initial proposal.",
+        suggestedChanges: [
+          {
+            proposalId: "proposal_lineage_1",
+            createdAt: "2026-06-24T00:00:01.000Z",
+            summary: "Set priority and assignee.",
+            intents: [
+              { intentId: "intent_priority_p1", domain: "priority", action: "set_priority", summary: "Set P1.", params: { priority: "P1" } },
+              { intentId: "intent_assignee_alice", domain: "assignee", action: "set_assignee", summary: "Assign Alice.", params: { assignee: "alice" } }
+            ]
+          }
+        ]
+      }
+    });
+
+    await repo.createRun({ id: "run_lineage_2", event: { ...baseEvent, id: "evt_lineage_2", sourceEventId: "comment_lineage_2" } });
+    await repo.completeRun({
+      runId: "run_lineage_2",
+      result: {
+        conclusion: "needs_human",
+        summary: "Prepared refined proposal.",
+        suggestedChanges: [
+          {
+            proposalId: "proposal_lineage_2",
+            createdAt: "2026-06-24T00:00:02.000Z",
+            summary: "Refine priority.",
+            intents: [
+              { intentId: "intent_priority_p0", domain: "priority", action: "set_priority", summary: "Set P0.", params: { priority: "P0" } }
+            ]
+          }
+        ]
+      }
+    });
+
+    const lineage = await repo.getProposalLineage({ proposalId: "proposal_lineage_1" });
+    expect(lineage?.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          proposalId: "proposal_lineage_1",
+          intentId: "intent_priority_p1",
+          domain: "priority",
+          status: "superseded",
+          supersededByProposalId: "proposal_lineage_2"
+        }),
+        expect.objectContaining({
+          proposalId: "proposal_lineage_1",
+          intentId: "intent_assignee_alice",
+          domain: "assignee",
+          status: "current"
+        }),
+        expect.objectContaining({
+          proposalId: "proposal_lineage_2",
+          intentId: "intent_priority_p0",
+          domain: "priority",
+          status: "current"
+        })
+      ])
+    );
+
+    await repo.recordApprovalDecision({
+      id: "approval_lineage",
+      proposalId: "proposal_lineage_1",
+      approvedIntentIds: ["intent_priority_p1", "intent_assignee_alice"],
+      approvedBy: { provider: "github", providerUserId: "42", handle: "octocat" },
+      approvedAt: "2026-06-24T00:00:03.000Z",
+      scope: "manual"
+    });
+    const plan = await repo.createApplyPlan({
+      id: "apply_lineage",
+      proposalId: "proposal_lineage_1",
+      approvalDecisionId: "approval_lineage"
+    });
+
+    expect(plan?.outcomes).toEqual([
+      expect.objectContaining({ intentId: "intent_priority_p1", outcome: "stale" }),
+      expect.objectContaining({ intentId: "intent_assignee_alice", outcome: "skipped" })
+    ]);
   });
 });
