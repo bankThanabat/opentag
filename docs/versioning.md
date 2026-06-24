@@ -23,11 +23,13 @@ Private runnable apps are not published:
 
 ## Pre-1.0 Policy
 
-The current packages are `0.0.0` while the public API is still settling.
+The current public release is `0.1.0`. The public API is still settling, so all releases remain in the `0.x` line until the package contracts are stable enough for `1.0.0`.
 
-Before the first npm release:
+The first npm release was published as the coordinated `0.1.0` package family.
 
-- Set every public package to the same initial version, for example `0.1.0`.
+For each npm release:
+
+- Set every public package to the same version.
 - Keep `private: true` only on runnable apps and the root workspace.
 - Verify `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
 - Run `npm pack --dry-run --json` in every public package directory and inspect included files.

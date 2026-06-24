@@ -3,6 +3,7 @@
 **Open-source agent mentions for every workspace.**
 
 [![Status](https://img.shields.io/badge/status-v0-blue)](#status)
+[![npm](https://img.shields.io/npm/v/@opentag/core?label=npm)](https://www.npmjs.com/org/opentag)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6)](https://www.typescriptlang.org/)
 [![Node](https://img.shields.io/badge/Node-22.x-339933)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
@@ -47,10 +48,19 @@ The goal is simple: make "tag an agent into work" a protocol, not a closed surfa
 - **Local-first execution** - `opentagd` resolves a configured local checkout before executing anything.
 - **Executor adapters** - `echo` is available for smoke tests, and `codex` can run a real Codex CLI task on an isolated branch.
 - **Embeddable SDK packages** - use the protocol, client, dispatcher, GitHub, Slack, runner, and store packages independently.
+- **Published npm packages** - the public `@opentag/*` package family is available on npm at version `0.1.0`.
 
 ## Quick Start
 
 Requires Node 22.x and pnpm 9.x.
+
+Install the published package family:
+
+```bash
+pnpm add @opentag/core @opentag/client @opentag/dispatcher @opentag/github @opentag/slack @opentag/runner @opentag/store
+```
+
+Or work from this repository:
 
 ```bash
 pnpm install
@@ -132,15 +142,17 @@ curl http://localhost:3030/v1/runs/run_demo_1/events
 
 ## Packages
 
+Current public release: `0.1.0`.
+
 | Package | Purpose |
 | --- | --- |
-| `@opentag/core` | Zod schemas, TypeScript types, mention parsing, and JSON Schema exports |
-| `@opentag/client` | HTTP client for ingress apps, local runners, and admin setup |
-| `@opentag/dispatcher` | Embeddable Hono dispatcher and callback sinks |
-| `@opentag/github` | GitHub event normalization, comment rendering, and PR helpers |
-| `@opentag/slack` | Slack event normalization, thread keys, and callback helpers |
-| `@opentag/store` | SQLite/Drizzle persistence and lease primitives |
-| `@opentag/runner` | Executor contracts plus echo and Codex executor adapters |
+| [`@opentag/core`](https://www.npmjs.com/package/@opentag/core) | Zod schemas, TypeScript types, mention parsing, and JSON Schema exports |
+| [`@opentag/client`](https://www.npmjs.com/package/@opentag/client) | HTTP client for ingress apps, local runners, and admin setup |
+| [`@opentag/dispatcher`](https://www.npmjs.com/package/@opentag/dispatcher) | Embeddable Hono dispatcher and callback sinks |
+| [`@opentag/github`](https://www.npmjs.com/package/@opentag/github) | GitHub event normalization, comment rendering, and PR helpers |
+| [`@opentag/slack`](https://www.npmjs.com/package/@opentag/slack) | Slack event normalization, thread keys, and callback helpers |
+| [`@opentag/store`](https://www.npmjs.com/package/@opentag/store) | SQLite/Drizzle persistence and lease primitives |
+| [`@opentag/runner`](https://www.npmjs.com/package/@opentag/runner) | Executor contracts plus echo and Codex executor adapters |
 
 Runnable apps:
 
@@ -237,6 +249,12 @@ Set `OPENTAG_PAIRING_TOKEN` on the dispatcher to require a shared Bearer token f
 - [GitHub to echo](examples/github-to-echo/README.md) - manual end-to-end GitHub-shaped smoke test.
 - [Embedded dispatcher](examples/embedded-dispatcher/README.md) - host the dispatcher inside another Node service.
 - [Custom runner](examples/custom-runner/README.md) - build a third-party runner with `@opentag/client` and `@opentag/runner`.
+
+## Real Integration Guides
+
+- [Real integration smoke test](docs/real-integration-smoke-test.md) - real GitHub and Slack setup, trigger, and debugging order based on an actual end-to-end validation pass.
+- `scripts/dev/start-github-test.sh` - starts the dispatcher, local daemon, and GitHub Probot ingress for a real GitHub smoke test.
+- `scripts/dev/start-slack-test.sh` - starts the dispatcher, local daemon, and Slack Events ingress for a real Slack smoke test.
 
 ## Status
 

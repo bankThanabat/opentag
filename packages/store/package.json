@@ -1,6 +1,6 @@
 {
   "name": "@opentag/store",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "SQLite and Drizzle persistence primitives for OpenTag runs and leases.",
   "type": "module",
   "main": "./dist/index.js",
@@ -34,7 +34,7 @@
   "dependencies": {
     "@opentag/core": "workspace:*",
     "better-sqlite3": "^11.7.0",
-    "drizzle-orm": "^0.38.3"
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
