@@ -18,7 +18,8 @@ program
     const config = loadConfigFromEnv();
     await createDispatcherAdminClient({
       dispatcherUrl: config.dispatcherUrl,
-      runnerId: config.runnerId
+      runnerId: config.runnerId,
+      ...(config.pairingToken ? { pairingToken: config.pairingToken } : {})
     }).registerRunner(config.runnerId);
     console.log(`Registered OpenTag runner ${config.runnerId}`);
   });
@@ -30,7 +31,8 @@ program
     const config = loadConfigFromEnv();
     const client = createDispatcherAdminClient({
       dispatcherUrl: config.dispatcherUrl,
-      runnerId: config.runnerId
+      runnerId: config.runnerId,
+      ...(config.pairingToken ? { pairingToken: config.pairingToken } : {})
     });
     for (const repository of config.repositories) {
       await client.bindRepository(repository);
@@ -58,7 +60,8 @@ program
       },
       client: createDispatcherClient({
         dispatcherUrl: config.dispatcherUrl,
-        runnerId: config.runnerId
+        runnerId: config.runnerId,
+        ...(config.pairingToken ? { pairingToken: config.pairingToken } : {})
       })
     });
     console.log(didWork ? "OpenTag run completed" : "No OpenTag run available");

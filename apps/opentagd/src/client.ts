@@ -8,12 +8,19 @@ function assertOk(response: Response, action: string): void {
   }
 }
 
-export function createDispatcherClient(input: { dispatcherUrl: string; runnerId: string }): DaemonClient {
+function authHeaders(pairingToken: string | undefined): Record<string, string> {
+  return pairingToken ? { authorization: `Bearer ${pairingToken}` } : {};
+}
+
+export function createDispatcherClient(input: { dispatcherUrl: string; runnerId: string; pairingToken?: string }): DaemonClient {
   const baseUrl = input.dispatcherUrl.replace(/\/$/, "");
 
   return {
     async claim(): Promise<ClaimedRun | null> {
-      const response = await fetch(`${baseUrl}/v1/runners/${input.runnerId}/claim`, { method: "POST" });
+      const response = await fetch(`${baseUrl}/v1/runners/${input.runnerId}/claim`, {
+        method: "POST",
+        headers: authHeaders(input.pairingToken)
+      });
       if (response.status === 204) return null;
       assertOk(response, "claim");
       const body = (await response.json()) as { run: OpenTagRun; event: OpenTagEvent };
@@ -26,17 +33,17 @@ export function createDispatcherClient(input: { dispatcherUrl: string; runnerId:
     async markRunning(runId, executor) {
       const response = await fetch(`${baseUrl}/v1/runs/${runId}/running`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders(input.pairingToken) },
         body: JSON.stringify({ executor })
       });
       assertOk(response, "markRunning");
     },
 
-    async progress(runId, input) {
+    async progress(runId, progressInput) {
       const response = await fetch(`${baseUrl}/v1/runs/${runId}/progress`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input)
+        headers: { "content-type": "application/json", ...authHeaders(input.pairingToken) },
+        body: JSON.stringify(progressInput)
       });
       assertOk(response, "progress");
     },
@@ -44,7 +51,7 @@ export function createDispatcherClient(input: { dispatcherUrl: string; runnerId:
     async complete(runId, result) {
       const response = await fetch(`${baseUrl}/v1/runs/${runId}/complete`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders(input.pairingToken) },
         body: JSON.stringify({ result })
       });
       assertOk(response, "complete");
@@ -52,14 +59,14 @@ export function createDispatcherClient(input: { dispatcherUrl: string; runnerId:
   };
 }
 
-export function createDispatcherAdminClient(input: { dispatcherUrl: string; runnerId: string }) {
+export function createDispatcherAdminClient(input: { dispatcherUrl: string; runnerId: string; pairingToken?: string }) {
   const baseUrl = input.dispatcherUrl.replace(/\/$/, "");
 
   return {
     async registerRunner(name = input.runnerId): Promise<void> {
       const response = await fetch(`${baseUrl}/v1/runners`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders(input.pairingToken) },
         body: JSON.stringify({ runnerId: input.runnerId, name })
       });
       assertOk(response, "registerRunner");
@@ -68,7 +75,7 @@ export function createDispatcherAdminClient(input: { dispatcherUrl: string; runn
     async bindRepository(binding: RepositoryBindingConfig): Promise<void> {
       const response = await fetch(`${baseUrl}/v1/repo-bindings`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders(input.pairingToken) },
         body: JSON.stringify({
           provider: binding.provider,
           owner: binding.owner,

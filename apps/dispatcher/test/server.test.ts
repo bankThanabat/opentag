@@ -16,6 +16,24 @@ const validEvent = {
 };
 
 describe("dispatcher API", () => {
+  it("requires a bearer token when pairing token auth is configured", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:", pairingToken: "pair_test" });
+
+    const denied = await app.request("/v1/runners", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runnerId: "runner_1", name: "Local Runner" })
+    });
+    expect(denied.status).toBe(401);
+
+    const allowed = await app.request("/v1/runners", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer pair_test" },
+      body: JSON.stringify({ runnerId: "runner_1", name: "Local Runner" })
+    });
+    expect(allowed.status).toBe(201);
+  });
+
   it("creates and claims an echo run", async () => {
     const app = createDispatcherApp({ databasePath: ":memory:" });
 

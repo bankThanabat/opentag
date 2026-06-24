@@ -15,6 +15,7 @@ export type OpenTagDaemonConfig = {
   dispatcherUrl: string;
   repositories: RepositoryBindingConfig[];
   githubToken?: string;
+  pairingToken?: string;
 };
 
 export function loadConfigFromEnv(): OpenTagDaemonConfig {
@@ -45,7 +46,8 @@ export function loadConfigFromEnv(): OpenTagDaemonConfig {
     runnerId: process.env.OPENTAG_RUNNER_ID ?? "runner_local",
     dispatcherUrl: process.env.OPENTAG_DISPATCHER_URL ?? "http://localhost:3030",
     repositories,
-    ...(process.env.OPENTAG_GITHUB_TOKEN ? { githubToken: process.env.OPENTAG_GITHUB_TOKEN } : {})
+    ...(process.env.OPENTAG_GITHUB_TOKEN ? { githubToken: process.env.OPENTAG_GITHUB_TOKEN } : {}),
+    ...(process.env.OPENTAG_PAIRING_TOKEN ? { pairingToken: process.env.OPENTAG_PAIRING_TOKEN } : {})
   };
   return config;
 }

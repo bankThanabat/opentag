@@ -23,6 +23,8 @@ OPENTAG_DATABASE_PATH=opentag.db pnpm --filter @opentag/dispatcher dev
 
 Set `OPENTAG_GITHUB_TOKEN` when you want the dispatcher to post callbacks to GitHub. For local smoke tests without a real GitHub thread, leave it unset and inspect `/events` instead.
 
+Set `OPENTAG_PAIRING_TOKEN=dev_pairing_token` on the dispatcher if you want to exercise authenticated local pairing.
+
 2. Create a local daemon config:
 
 ```bash
@@ -30,6 +32,7 @@ cat > opentag.local.json <<'JSON'
 {
   "runnerId": "runner_local",
   "dispatcherUrl": "http://localhost:3030",
+  "pairingToken": "dev_pairing_token",
   "repositories": [
     {
       "provider": "github",
@@ -103,6 +106,7 @@ Switch the config to `"defaultExecutor": "codex"` to run a real Codex CLI execut
 {
   "runnerId": "runner_local",
   "dispatcherUrl": "http://localhost:3030",
+  "pairingToken": "dev_pairing_token",
   "githubToken": "ghs_optional_token_for_pr_creation",
   "repositories": [
     {

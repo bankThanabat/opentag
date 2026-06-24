@@ -85,7 +85,10 @@ async function createDispatcherRun(input: { event: unknown; log: { warn(data: un
   }
   const response = await fetch(`${dispatcherUrl.replace(/\/$/, "")}/v1/runs`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(process.env.OPENTAG_DISPATCHER_TOKEN ? { authorization: `Bearer ${process.env.OPENTAG_DISPATCHER_TOKEN}` } : {})
+    },
     body: JSON.stringify({ runId, event: input.event })
   });
   if (!response.ok) {

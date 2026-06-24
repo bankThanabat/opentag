@@ -46,6 +46,8 @@ pnpm typecheck
 
 Set `OPENTAG_GITHUB_TOKEN` on the dispatcher to let it post acknowledgement, progress, and final callback messages to GitHub comments. When dispatcher callbacks are enabled, set `OPENTAG_DISPATCHER_OWNS_CALLBACKS=true` on the Probot app to avoid duplicate acknowledgement comments.
 
+Set `OPENTAG_PAIRING_TOKEN` on the dispatcher to require a shared Bearer token for `/v1/*` endpoints. Use the same value as `pairingToken` in `opentagd` config, and set `OPENTAG_DISPATCHER_TOKEN` on the Probot app when it creates runs through the dispatcher.
+
 ## Local Runner Config
 
 `opentagd` can read a JSON config through `OPENTAG_CONFIG_PATH`:
@@ -54,6 +56,7 @@ Set `OPENTAG_GITHUB_TOKEN` on the dispatcher to let it post acknowledgement, pro
 {
   "runnerId": "runner_local",
   "dispatcherUrl": "http://localhost:3030",
+  "pairingToken": "shared_pairing_token",
   "repositories": [
     {
       "provider": "github",

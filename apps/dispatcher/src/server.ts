@@ -83,7 +83,12 @@ async function deliverAndAudit(input: {
   });
 }
 
-export function createDispatcherApp(input: { databasePath: string; callbackSink?: CallbackSink }) {
+function isAuthorized(request: Request, pairingToken: string | undefined): boolean {
+  if (!pairingToken) return true;
+  return request.headers.get("authorization") === `Bearer ${pairingToken}`;
+}
+
+export function createDispatcherApp(input: { databasePath: string; callbackSink?: CallbackSink; pairingToken?: string }) {
   const sqlite = new Database(input.databasePath);
   migrateSchema(sqlite);
   const repo = createOpenTagRepository(drizzle(sqlite));
@@ -91,6 +96,13 @@ export function createDispatcherApp(input: { databasePath: string; callbackSink?
   const callbackSink = input.callbackSink ?? noopCallbackSink;
 
   app.get("/healthz", (c) => c.json({ ok: true }));
+
+  app.use("/v1/*", async (c, next) => {
+    if (!isAuthorized(c.req.raw, input.pairingToken)) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    await next();
+  });
 
   app.post("/v1/runners", async (c) => {
     const parsed = CreateRunnerSchema.parse(await c.req.json());

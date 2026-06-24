@@ -8,6 +8,7 @@ const databasePath = process.env.OPENTAG_DATABASE_PATH ?? "opentag.db";
 serve({
   fetch: createDispatcherApp({
     databasePath,
+    ...(process.env.OPENTAG_PAIRING_TOKEN ? { pairingToken: process.env.OPENTAG_PAIRING_TOKEN } : {}),
     callbackSink: createGitHubCallbackSink({
       ...(process.env.OPENTAG_GITHUB_TOKEN ? { token: process.env.OPENTAG_GITHUB_TOKEN } : {})
     })
