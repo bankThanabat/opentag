@@ -3,7 +3,8 @@
 **Open-source agent mentions for every workspace.**
 
 [![Status](https://img.shields.io/badge/status-v0-blue)](#status)
-[![npm](https://img.shields.io/npm/v/@opentag/core?label=npm)](https://www.npmjs.com/org/opentag)
+[![Release](https://img.shields.io/github/v/release/amplifthq/opentag?include_prereleases&label=release)](https://github.com/amplifthq/opentag/releases)
+[![npm](https://img.shields.io/npm/v/@opentag/core?label=%40opentag%2Fcore)](https://www.npmjs.com/package/@opentag/core)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6)](https://www.typescriptlang.org/)
 [![Node](https://img.shields.io/badge/Node-22.x-339933)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
@@ -142,7 +143,9 @@ curl http://localhost:3030/v1/runs/run_demo_1/events
 
 ## Packages
 
-Current public release: `0.1.0`.
+Current public release: `v0.1.0`.
+
+The npm packages are published under the `@opentag` scope at version `0.1.0`. GitHub releases track the package family version; see [CHANGELOG.md](CHANGELOG.md) for release history.
 
 | Package | Purpose |
 | --- | --- |
