@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createCodexExecutor } from "../src/codex.js";
 import type { CommandRunner } from "../src/command.js";
-import { branchNameForRun, parseChangedFiles } from "../src/git.js";
+import { branchNameForRun, commitChangedFiles, parseChangedFiles } from "../src/git.js";
 
 describe("Codex executor", () => {
   it("creates an isolated branch, runs codex exec, and reports changed files", async () => {
@@ -121,5 +121,24 @@ describe("git helpers", () => {
 
   it("sanitizes branch names", () => {
     expect(branchNameForRun("run/with spaces")).toBe("opentag/run-with-spaces");
+  });
+
+  it("stages and commits selected changed files", async () => {
+    const calls: string[] = [];
+    const runner: CommandRunner = {
+      async run(command, args) {
+        calls.push(`${command} ${args.join(" ")}`);
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+    };
+
+    await commitChangedFiles({
+      runner,
+      workspacePath: "/tmp/demo",
+      files: ["README.md", "src/demo.ts"],
+      message: "OpenTag run run_1"
+    });
+
+    expect(calls).toEqual(["git add -- README.md src/demo.ts", "git commit -m OpenTag run run_1"]);
   });
 });

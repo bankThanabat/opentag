@@ -50,6 +50,19 @@ export async function changedFiles(input: { runner: CommandRunner; workspacePath
   return parseChangedFiles(result.stdout);
 }
 
+export async function commitChangedFiles(input: {
+  runner: CommandRunner;
+  workspacePath: string;
+  files: string[];
+  message: string;
+}): Promise<void> {
+  if (input.files.length === 0) return;
+  const addResult = await input.runner.run("git", ["add", "--", ...input.files], { cwd: input.workspacePath });
+  await assertCommandSucceeded(addResult, "stage changed files");
+  const commitResult = await input.runner.run("git", ["commit", "-m", input.message], { cwd: input.workspacePath });
+  await assertCommandSucceeded(commitResult, "commit changed files");
+}
+
 export async function cleanupInternalArtifacts(input: { runner: CommandRunner; workspacePath: string }): Promise<string[]> {
   const statusResult = await input.runner.run("git", ["status", "--porcelain"], { cwd: input.workspacePath });
   await assertCommandSucceeded(statusResult, "scan internal artifacts");

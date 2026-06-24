@@ -64,7 +64,7 @@ describe("maybeCreatePullRequest", () => {
       }
     });
 
-    expect(commands).toEqual(["git push -u origin opentag/run_1"]);
+    expect(commands).toEqual(["git add -- src/demo.ts", "git commit -m OpenTag run run_1", "git push -u origin opentag/run_1"]);
     expect(requests).toEqual(["https://api.github.com/repos/acme/demo/pulls"]);
     expect(updated.createdPullRequestUrl).toBe("https://github.com/acme/demo/pull/1");
     expect(updated.artifacts?.at(-1)).toMatchObject({ kind: "pull_request", uri: "https://github.com/acme/demo/pull/1" });

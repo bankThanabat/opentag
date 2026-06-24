@@ -1,6 +1,6 @@
 import type { OpenTagEvent, OpenTagRun, OpenTagRunResult } from "@opentag/core";
 import { buildPullRequestBody, createPullRequestViaFetch, type FetchLike } from "@opentag/github";
-import { branchNameForRun, nodeCommandRunner, pushBranch, type CommandRunner } from "@opentag/runner";
+import { branchNameForRun, commitChangedFiles, nodeCommandRunner, pushBranch, type CommandRunner } from "@opentag/runner";
 import type { RepositoryBindingConfig } from "./config.js";
 
 export type PullRequestOptions = {
@@ -30,8 +30,15 @@ export async function maybeCreatePullRequest(input: {
   if (typeof owner !== "string" || typeof repo !== "string") return input.result;
 
   const branchName = branchNameForRun(input.run.id);
+  const runner = input.options.commandRunner ?? nodeCommandRunner;
+  await commitChangedFiles({
+    runner,
+    workspacePath: input.binding.checkoutPath,
+    files: input.result.changedFiles,
+    message: `OpenTag run ${input.run.id}`
+  });
   await pushBranch({
-    runner: input.options.commandRunner ?? nodeCommandRunner,
+    runner,
     workspacePath: input.binding.checkoutPath,
     remote: input.binding.pushRemote ?? "origin",
     branchName
