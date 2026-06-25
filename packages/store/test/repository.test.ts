@@ -390,7 +390,55 @@ describe("OpenTag repository", () => {
     expect(second.created).toBe(false);
 
     const events = await repo.listRunEvents({ runId: "run_duplicate_1" });
+    expect(events.map((event) => event.type)).toContain("admission.decided");
     expect(events.map((event) => event.type)).toContain("run.create_idempotent_replay");
+  });
+
+  it("preserves the generated context packet snapshot even if event derivation changes later", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.createRun({
+      id: "run_snapshot_1",
+      event: {
+        id: "evt_snapshot_1",
+        source: "github",
+        sourceEventId: "comment_snapshot_1",
+        receivedAt: "2026-06-24T00:00:00.000Z",
+        actor: { provider: "github", providerUserId: "42", handle: "octocat" },
+        target: { mention: "@opentag", agentId: "opentag" },
+        command: { rawText: "fix this", intent: "fix", args: {} },
+        context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }],
+        permissions: [{ scope: "issue:comment", reason: "reply to source thread" }],
+        callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/1/comments" },
+        metadata: { owner: "acme", repo: "demo" }
+      }
+    });
+
+    sqlite
+      .prepare("UPDATE runs SET event_json = ? WHERE id = ?")
+      .run(
+        JSON.stringify({
+          id: "evt_snapshot_1",
+          source: "github",
+          sourceEventId: "comment_snapshot_1",
+          receivedAt: "2026-06-24T00:00:00.000Z",
+          actor: { provider: "github", providerUserId: "42", handle: "octocat" },
+          target: { mention: "@opentag", agentId: "opentag" },
+          command: { rawText: "this mutated event should not rewrite the packet", intent: "explain", args: {} },
+          context: [],
+          permissions: [{ scope: "issue:comment", reason: "reply to source thread" }],
+          callback: { provider: "github", uri: "https://api.github.com/repos/acme/demo/issues/1/comments" },
+          metadata: { owner: "acme", repo: "demo" }
+        }),
+        "run_snapshot_1"
+      );
+
+    const stored = await repo.getRun({ runId: "run_snapshot_1" });
+    expect(stored?.run.contextPacket?.summary).toBe("fix this");
+    expect(stored?.run.contextPacket?.sourcePointers).toHaveLength(1);
   });
 
   it("records a completed result", async () => {
@@ -430,10 +478,11 @@ describe("OpenTag repository", () => {
     expect(stored?.run.contextPacket?.assembly?.stages).toContain("emit");
 
     const events = await repo.listRunEvents({ runId: "run_2" });
-    expect(events.map((event) => event.type)).toEqual(["run.created", "context_packet.generated", "run.completed"]);
-    expect(events[0]).toMatchObject({ visibility: "audit", importance: "low" });
-    expect(events[1]).toMatchObject({ visibility: "audit", importance: "normal", message: "run echo" });
-    expect(events[2]).toMatchObject({ visibility: "audit", importance: "high", message: "done" });
+    expect(events.map((event) => event.type)).toEqual(["admission.decided", "run.created", "context_packet.generated", "run.completed"]);
+    expect(events[0]).toMatchObject({ visibility: "audit", importance: "normal" });
+    expect(events[1]).toMatchObject({ visibility: "audit", importance: "low" });
+    expect(events[2]).toMatchObject({ visibility: "audit", importance: "normal", message: "run echo" });
+    expect(events[3]).toMatchObject({ visibility: "audit", importance: "high", message: "done" });
   });
 
   it("does not write completion artifacts for missing runs", async () => {

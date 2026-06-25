@@ -82,6 +82,7 @@ describe("opentagd local integration", () => {
 
     const { events } = await client.listRunEvents({ runId: "run_integration" });
     expect(events.map((item) => (item as { type: string }).type)).toEqual([
+      "admission.decided",
       "run.created",
       "context_packet.generated",
       "callback.acknowledgement.queued",
@@ -172,6 +173,7 @@ describe("opentagd local integration", () => {
 
     const { events } = await client.listRunEvents({ runId: "run_blocked" });
     expect(events.map((item) => (item as { type: string }).type)).toEqual([
+      "admission.decided",
       "run.created",
       "context_packet.generated",
       "callback.acknowledgement.queued",

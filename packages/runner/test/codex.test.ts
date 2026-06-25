@@ -81,6 +81,12 @@ describe("Codex executor", () => {
         workspacePath: "/tmp/demo",
         command: { rawText: "fix this", intent: "fix", args: {} },
         context: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }],
+        contextPacket: {
+          summary: "Fix the requested issue with the narrowest possible change.",
+          sourcePointers: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }],
+          facts: [{ text: "CI is failing on the linked issue." }],
+          exclusions: ["Do not touch unrelated operational files."]
+        },
         permissions: [{ scope: "repo:write", reason: "write branch" }],
         baseBranch: "main",
         keepWorktree: "on_failure"
@@ -108,6 +114,9 @@ describe("Codex executor", () => {
     const codexExecCall = calls.find((call) => call.command === "codex" && call.args[0] === "exec");
     expect(codexExecCall?.args).toContain("--full-auto");
     expect(codexExecCall?.args).toContain("--ephemeral");
+    expect(codexExecCall?.input).toContain("OpenTag context packet:");
+    expect(codexExecCall?.input).toContain("Fix the requested issue with the narrowest possible change.");
+    expect(codexExecCall?.input).toContain("Do not touch unrelated operational files.");
     expect(codexExecCall?.input).toContain("fix this");
     expect(codexExecCall?.cwd).toBe(worktreePath);
     expect(codexExecCall?.env?.OPENAI_API_KEY).toBeUndefined();

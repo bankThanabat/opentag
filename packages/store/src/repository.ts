@@ -4,12 +4,16 @@ import {
   ApplyPlanSchema,
   ActionHintSchema,
   AdapterMutationMappingSchema,
+  ContextPacketSchema,
+  conversationKeyFromEvent,
+  defaultRunEventMetadata,
   OpenTagEventSchema,
   OpenTagRunResultSchema,
   PolicyRuleSchema,
   ProposalLineageSchema,
   preflightMutationIntent,
   protocolRunFieldsFromEvent,
+  RunAdmissionDecisionSchema,
   RunEventImportanceSchema,
   RunEventVisibilitySchema,
   SuggestedChangesSnapshotSchema,
@@ -24,6 +28,7 @@ import {
   type OpenTagRunResult,
   type PolicyRule,
   type ProposalLineage,
+  type RunAdmissionDecision,
   type RunEventImportance,
   type RunEventVisibility,
   type SuggestedChangesSnapshot
@@ -38,6 +43,7 @@ import {
   repoMutationMappings,
   repoPolicyRules,
   callbackDeliveries,
+  followUpRequests,
   runEvents,
   runners,
   runs,
@@ -136,6 +142,19 @@ export type CreateRunResult = {
   created: boolean;
 };
 
+export type FollowUpRequest = {
+  id: string;
+  sourceEventId: string;
+  conversationKey: string;
+  activeRunId?: string;
+  event: OpenTagEvent;
+  decision: RunAdmissionDecision;
+  status: "queued" | "promoted" | "cancelled";
+  createdRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type OpenTagRunMetrics = {
   runId: string;
   totalEventCount: number;
@@ -179,30 +198,20 @@ function isIsoExpired(iso: string | null, now: Date): boolean {
   return new Date(iso).getTime() <= now.getTime();
 }
 
-function defaultRunEventVisibility(type: string): RunEventVisibility {
-  if (type.startsWith("callback.")) return "human";
-  if (type.startsWith("executor.log")) return "debug";
-  if (type === "run.progress") return "audit";
-  return "audit";
-}
-
-function defaultRunEventImportance(type: string): RunEventImportance {
-  if (type === "run.waiting_for_permission") return "blocking";
-  if (type === "run.completed" || type.startsWith("callback.final")) return "high";
-  if (type === "run.created") return "low";
-  return "normal";
-}
-
 function runFromRow(row: typeof runs.$inferSelect): OpenTagRun {
   const event = OpenTagEventSchema.parse(JSON.parse(row.eventJson));
   const result = row.resultJson ? OpenTagRunResultSchema.parse(JSON.parse(row.resultJson)) : undefined;
   const triggeredByAction = row.triggeredByActionJson ? ActionHintSchema.parse(JSON.parse(row.triggeredByActionJson)) : undefined;
   const protocolFields = protocolRunFieldsFromEvent(event, row.createdAt);
+  const contextPacket = row.contextPacketJson
+    ? ContextPacketSchema.parse(JSON.parse(row.contextPacketJson))
+    : protocolFields.contextPacket;
   return {
     id: row.id,
     eventId: row.eventId,
     status: row.status as OpenTagRun["status"],
-    ...protocolFields,
+    ...(protocolFields.thread ? { thread: protocolFields.thread } : {}),
+    contextPacket,
     ...(row.parentRunId ? { parentRunId: row.parentRunId } : {}),
     ...(triggeredByAction ? { triggeredByAction } : {}),
     ...(row.sourceProposalId ? { sourceProposalId: row.sourceProposalId } : {}),
@@ -235,6 +244,21 @@ function callbackDeliveryFromRow(row: typeof callbackDeliveries.$inferSelect): C
     attempts: row.attempts,
     ...(row.lastError ? { lastError: row.lastError } : {}),
     ...(row.nextAttemptAt ? { nextAttemptAt: row.nextAttemptAt } : {}),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function followUpRequestFromRow(row: typeof followUpRequests.$inferSelect): FollowUpRequest {
+  return {
+    id: row.id,
+    sourceEventId: row.sourceEventId,
+    conversationKey: row.conversationKey,
+    ...(row.activeRunId ? { activeRunId: row.activeRunId } : {}),
+    event: OpenTagEventSchema.parse(JSON.parse(row.eventJson)),
+    decision: RunAdmissionDecisionSchema.parse(JSON.parse(row.decisionJson)),
+    status: row.status as FollowUpRequest["status"],
+    ...(row.createdRunId ? { createdRunId: row.createdRunId } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -469,8 +493,8 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
     await db.insert(runEvents).values({
       runId: input.runId,
       type: input.type,
-      visibility: input.visibility ?? defaultRunEventVisibility(input.type),
-      importance: input.importance ?? defaultRunEventImportance(input.type),
+      visibility: input.visibility ?? defaultRunEventMetadata(input.type).visibility,
+      importance: input.importance ?? defaultRunEventMetadata(input.type).importance,
       message: input.message ?? null,
       payloadJson: JSON.stringify(input.payload),
       createdAt: input.createdAt ?? nowIso()
@@ -479,6 +503,114 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
 
   return {
     appendRunEvent,
+
+    async getRunByEventId(input: { eventId: string }): Promise<{ run: OpenTagRun; event: OpenTagEvent } | null> {
+      const row = await db.select().from(runs).where(eq(runs.eventId, input.eventId)).limit(1).get();
+      if (!row) return null;
+      return {
+        run: runFromRow(row),
+        event: OpenTagEventSchema.parse(JSON.parse(row.eventJson))
+      };
+    },
+
+    async findActiveRunForConversation(input: { conversationKey: string }): Promise<{ run: OpenTagRun; event: OpenTagEvent } | null> {
+      const row = await db
+        .select()
+        .from(runs)
+        .where(and(eq(runs.conversationKey, input.conversationKey), inArray(runs.status, ["assigned", "running"])))
+        .orderBy(asc(runs.createdAt))
+        .limit(1)
+        .get();
+      if (!row) return null;
+      return {
+        run: runFromRow(row),
+        event: OpenTagEventSchema.parse(JSON.parse(row.eventJson))
+      };
+    },
+
+    async createFollowUpRequest(input: {
+      id: string;
+      event: OpenTagEvent;
+      decision: RunAdmissionDecision;
+      activeRunId?: string;
+    }): Promise<{ followUpRequest: FollowUpRequest; created: boolean }> {
+      const event = OpenTagEventSchema.parse(input.event);
+      const decision = RunAdmissionDecisionSchema.parse(input.decision);
+      const createdAt = nowIso();
+      const conversationKey = conversationKeyFromEvent(event);
+      const insertResult = await db
+        .insert(followUpRequests)
+        .values({
+          id: input.id,
+          sourceEventId: event.id,
+          conversationKey,
+          activeRunId: input.activeRunId ?? null,
+          eventJson: JSON.stringify(event),
+          decisionJson: JSON.stringify(decision),
+          status: "queued",
+          createdRunId: null,
+          createdAt,
+          updatedAt: createdAt
+        })
+        .onConflictDoNothing({ target: followUpRequests.sourceEventId });
+      if (insertResult.changes === 0) {
+        const existing = await db.select().from(followUpRequests).where(eq(followUpRequests.sourceEventId, event.id)).limit(1).get();
+        if (!existing) {
+          throw new Error(`Follow-up request already exists for event ${event.id}, but it could not be loaded`);
+        }
+        return { followUpRequest: followUpRequestFromRow(existing), created: false };
+      }
+      const created = await db.select().from(followUpRequests).where(eq(followUpRequests.id, input.id)).limit(1).get();
+      if (!created) {
+        throw new Error(`Follow-up request ${input.id} was created but could not be loaded`);
+      }
+      return { followUpRequest: followUpRequestFromRow(created), created: true };
+    },
+
+    async getFollowUpRequest(input: { id: string }): Promise<FollowUpRequest | null> {
+      const row = await db.select().from(followUpRequests).where(eq(followUpRequests.id, input.id)).limit(1).get();
+      return row ? followUpRequestFromRow(row) : null;
+    },
+
+    async createRunFromFollowUpRequest(input: { followUpRequestId: string; runId: string }): Promise<{ followUpRequest: FollowUpRequest; run: OpenTagRun }> {
+      const row = await db.select().from(followUpRequests).where(eq(followUpRequests.id, input.followUpRequestId)).limit(1).get();
+      if (!row) {
+        throw new Error(`Follow-up request not found: ${input.followUpRequestId}`);
+      }
+      if (row.status !== "queued") {
+        throw new Error(`Follow-up request ${input.followUpRequestId} is not queued.`);
+      }
+      const followUp = followUpRequestFromRow(row);
+      const { run } = await this.createRun({
+        id: input.runId,
+        event: followUp.event,
+        ...(followUp.activeRunId ? { parentRunId: followUp.activeRunId } : {})
+      });
+      const updatedAt = nowIso();
+      await db
+        .update(followUpRequests)
+        .set({
+          status: "promoted",
+          createdRunId: run.id,
+          updatedAt
+        })
+        .where(eq(followUpRequests.id, input.followUpRequestId));
+      const updated = await db.select().from(followUpRequests).where(eq(followUpRequests.id, input.followUpRequestId)).limit(1).get();
+      if (!updated) {
+        throw new Error(`Follow-up request ${input.followUpRequestId} was promoted but could not be loaded`);
+      }
+      if (followUp.activeRunId) {
+        await appendRunEvent({
+          runId: followUp.activeRunId,
+          type: "follow_up_request.promoted",
+          payload: { followUpRequestId: followUp.id, createdRunId: run.id, sourceEventId: followUp.sourceEventId },
+          visibility: "audit",
+          importance: "normal",
+          createdAt: updatedAt
+        });
+      }
+      return { followUpRequest: followUpRequestFromRow(updated), run };
+    },
 
     async registerRunner(input: { runnerId: string; name: string }): Promise<void> {
       const createdAt = nowIso();
@@ -656,6 +788,7 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         eventId: event.id,
         status: "queued",
         eventJson: JSON.stringify(event),
+        contextPacketJson: JSON.stringify(protocolFields.contextPacket),
         parentRunId: input.parentRunId ?? null,
         triggeredByActionJson: triggeredByAction ? JSON.stringify(triggeredByAction) : null,
         sourceProposalId: input.sourceProposalId ?? null,
@@ -664,6 +797,7 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         repoOwner: repoKey?.owner ?? null,
         repoName: repoKey?.repo ?? null,
         workThreadId: protocolFields.thread?.id ?? null,
+        conversationKey: conversationKeyFromEvent(event),
         createdAt,
         updatedAt: createdAt
         })
@@ -673,6 +807,23 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         if (!existingBySourceEvent) {
           throw new Error(`Run already exists for event ${event.id}, but it could not be loaded`);
         }
+        const replayDecision = RunAdmissionDecisionSchema.parse({
+          action: "drop_duplicate",
+          reason: "Source event already created a run.",
+          reasonCode: "duplicate_source_event",
+          decidedAt: createdAt,
+          activeRunId: existingBySourceEvent.id,
+          eventId: event.id
+        });
+        await appendRunEvent({
+          runId: existingBySourceEvent.id,
+          type: "admission.decided",
+          payload: replayDecision,
+          visibility: "audit",
+          importance: "normal",
+          message: replayDecision.reason,
+          createdAt
+        });
         await appendRunEvent({
           runId: existingBySourceEvent.id,
           type: "run.create_idempotent_replay",
@@ -683,6 +834,22 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         });
         return { run: runFromRow(existingBySourceEvent), created: false };
       }
+      const createDecision = RunAdmissionDecisionSchema.parse({
+        action: "start",
+        reason: "Source event accepted and ready to create a run.",
+        reasonCode: "new_event",
+        decidedAt: createdAt,
+        eventId: event.id
+      });
+      await appendRunEvent({
+        runId: input.id,
+        type: "admission.decided",
+        payload: createDecision,
+        visibility: "audit",
+        importance: "normal",
+        message: createDecision.reason,
+        createdAt
+      });
       await appendRunEvent({
         runId: input.id,
         type: "run.created",
@@ -729,6 +896,7 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
           ...(triggeredByAction ? { triggeredByAction } : {}),
           ...(input.sourceProposalId ? { sourceProposalId: input.sourceProposalId } : {}),
           ...(input.sourceApplyPlanId ? { sourceApplyPlanId: input.sourceApplyPlanId } : {}),
+          contextPacket: protocolFields.contextPacket,
           createdAt,
           updatedAt: createdAt
         },
@@ -817,17 +985,14 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
 
       return {
         run: {
-          id: row.id,
-          eventId: row.eventId,
+          ...runFromRow({
+            ...row,
+            status: "assigned",
+            assignedRunnerId: input.runnerId,
+            updatedAt
+          }),
           status: "assigned",
-          ...protocolRunFieldsFromEvent(OpenTagEventSchema.parse(JSON.parse(row.eventJson)), row.createdAt),
-          ...(row.parentRunId ? { parentRunId: row.parentRunId } : {}),
-          ...(row.triggeredByActionJson ? { triggeredByAction: ActionHintSchema.parse(JSON.parse(row.triggeredByActionJson)) } : {}),
-          ...(row.sourceProposalId ? { sourceProposalId: row.sourceProposalId } : {}),
-          ...(row.sourceApplyPlanId ? { sourceApplyPlanId: row.sourceApplyPlanId } : {}),
           assignedRunnerId: input.runnerId,
-          executor: row.executor ?? undefined,
-          createdAt: row.createdAt,
           updatedAt
         },
         event: OpenTagEventSchema.parse(JSON.parse(row.eventJson))

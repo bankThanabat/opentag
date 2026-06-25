@@ -2,8 +2,8 @@ import {
   AdapterMutationMappingSchema,
   ActorIdentitySchema,
   ActionHintSchema,
-  createAdapterMutationCompilerRegistry,
   type OpenTagEvent,
+  createAdapterMutationCompilerRegistry,
   OpenTagEventSchema,
   OpenTagRunResultSchema,
   PolicyRuleSchema,
@@ -22,6 +22,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { Hono } from "hono";
 import { z } from "zod";
+import { createAdmissionRuntime, type AgentAccessProfileCheck } from "./admission.js";
 import { createDefaultCallbackPresentation, type CallbackPresentation } from "./presentation.js";
 
 const CreateRunnerSchema = z.object({
@@ -70,6 +71,10 @@ const CreateRunSchema = z.object({
   event: OpenTagEventSchema
 });
 
+const PromoteFollowUpRequestSchema = z.object({
+  runId: z.string().min(1)
+});
+
 const CompleteRunSchema = z.object({
   result: OpenTagRunResultSchema
 });
@@ -111,26 +116,6 @@ const ProgressSchema = z.object({
   visibility: RunEventVisibilitySchema.optional(),
   importance: RunEventImportanceSchema.optional()
 });
-
-function repoKeyFromEvent(event: z.infer<typeof OpenTagEventSchema>): { provider: string; owner: string; repo: string } | null {
-  const owner = event.metadata["owner"];
-  const repo = event.metadata["repo"];
-  if (typeof owner !== "string" || typeof repo !== "string") return null;
-  return {
-    provider: typeof event.metadata["repoProvider"] === "string" ? (event.metadata["repoProvider"] as string) : "github",
-    owner,
-    repo
-  };
-}
-
-function isWriteCapable(event: z.infer<typeof OpenTagEventSchema>): boolean {
-  return event.permissions.some((permission) => ["repo:write", "pr:create", "pr:update"].includes(permission.scope));
-}
-
-function actorIsAllowed(event: z.infer<typeof OpenTagEventSchema>, allowedActors: string[] | undefined): boolean {
-  if (!allowedActors?.length) return true;
-  return allowedActors.includes(event.actor.handle ?? "") || allowedActors.includes(event.actor.providerUserId);
-}
 
 function childEventFromParent(input: {
   parentEvent: OpenTagEvent;
@@ -305,6 +290,7 @@ export function createDispatcherApp(input: {
   presentation?: CallbackPresentation;
   githubApply?: GitHubApplyOptions;
   callbackRetry?: CallbackRetryOptions;
+  agentAccessProfileCheck?: AgentAccessProfileCheck;
 }) {
   const sqlite = new Database(input.databasePath);
   migrateSchema(sqlite);
@@ -313,6 +299,10 @@ export function createDispatcherApp(input: {
   const callbackSink = input.callbackSink ?? noopCallbackSink;
   const presentation = input.presentation ?? createDefaultCallbackPresentation();
   const callbackRetry = input.callbackRetry ?? {};
+  const admission = createAdmissionRuntime({
+    repo,
+    ...(input.agentAccessProfileCheck ? { agentAccessProfileCheck: input.agentAccessProfileCheck } : {})
+  });
 
   app.get("/healthz", (c) => c.json({ ok: true }));
 
@@ -456,22 +446,36 @@ export function createDispatcherApp(input: {
 
   app.post("/v1/runs", async (c) => {
     const parsed = CreateRunSchema.parse(await c.req.json());
-    const repoKey = repoKeyFromEvent(parsed.event);
-    if (!repoKey) {
-      return c.json({ error: "repo_context_missing" }, 422);
-    }
-    const binding = await repo.getRepoBinding(repoKey);
-    if (!binding) {
-      return c.json({ error: "repo_not_bound" }, 403);
-    }
-    if (isWriteCapable(parsed.event) && !actorIsAllowed(parsed.event, binding.allowedActors)) {
-      return c.json({ error: "actor_not_allowed_for_write" }, 403);
+    const admitted = await admission.admitRun({ requestId: parsed.runId, event: parsed.event });
+
+    if (admitted.outcome === "needs_human_decision") {
+      return c.json({ decision: admitted.decision }, 202);
     }
 
-    const { run, created } = await repo.createRun({ id: parsed.runId, event: parsed.event });
-    if (!created) {
-      return c.json({ run, idempotentReplay: true }, 200);
+    if (admitted.outcome === "drop_duplicate") {
+      await repo.appendRunEvent({
+        runId: admitted.run.id,
+        type: "admission.decided",
+        payload: admitted.decision,
+        visibility: "audit",
+        importance: "normal",
+        message: admitted.decision.reason
+      });
+      await repo.appendRunEvent({
+        runId: admitted.run.id,
+        type: "run.create_idempotent_replay",
+        payload: { requestedRunId: parsed.runId, eventId: parsed.event.id },
+        visibility: "audit",
+        importance: "low"
+      });
+      return c.json({ decision: admitted.decision, run: admitted.run, idempotentReplay: true }, 200);
     }
+
+    if (admitted.outcome === "follow_up_queued") {
+      return c.json({ decision: admitted.decision, followUpRequest: admitted.followUpRequest }, 202);
+    }
+
+    const { run } = await repo.createRun({ id: parsed.runId, event: parsed.event });
     await deliverAndAudit({
       repo,
       sink: callbackSink,
@@ -486,7 +490,38 @@ export function createDispatcherApp(input: {
         ...(parsed.event.callback.threadKey ? { threadKey: parsed.event.callback.threadKey } : {})
       }
     });
-    return c.json({ run }, 201);
+    return c.json({ decision: admitted.decision, run }, 201);
+  });
+
+  app.get("/v1/follow-up-requests/:id", async (c) => {
+    const followUpRequest = await repo.getFollowUpRequest({ id: c.req.param("id") });
+    if (!followUpRequest) return c.json({ error: "follow_up_request_not_found" }, 404);
+    return c.json({ followUpRequest });
+  });
+
+  app.post("/v1/follow-up-requests/:id/create-run", async (c) => {
+    const parsed = PromoteFollowUpRequestSchema.parse(await c.req.json());
+    const promoted = await repo.createRunFromFollowUpRequest({
+      followUpRequestId: c.req.param("id"),
+      runId: parsed.runId
+    });
+    const followUpRequest = promoted.followUpRequest;
+    const event = followUpRequest.event;
+    await deliverAndAudit({
+      repo,
+      sink: callbackSink,
+      retry: callbackRetry,
+      message: {
+        runId: promoted.run.id,
+        kind: "acknowledgement",
+        provider: event.callback.provider,
+        uri: event.callback.uri,
+        body: presentation.acknowledgement({ provider: event.callback.provider, runId: promoted.run.id }),
+        ...(event.target.agentId ? { agentId: event.target.agentId } : {}),
+        ...(event.callback.threadKey ? { threadKey: event.callback.threadKey } : {})
+      }
+    });
+    return c.json({ followUpRequest, run: promoted.run }, 201);
   });
 
   app.post("/v1/runners/:runnerId/claim", async (c) => {

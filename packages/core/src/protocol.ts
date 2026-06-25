@@ -2,6 +2,7 @@ import type {
   ApplyIntentOutcome,
   CapabilityContract,
   ContextPacket,
+  ContextPacketFactConfidence,
   ContextPointer,
   ConversationAnchor,
   MutationIntent,
@@ -31,6 +32,18 @@ export type ClassifiedContextPointer = {
   reason: string;
 };
 
+function contextPacketSourceRole(classification: ContextSourceClassification): "primary" | "supporting" | "background" {
+  switch (classification) {
+    case "primary_evidence":
+      return "primary";
+    case "supporting_context":
+      return "supporting";
+    case "background_noise":
+    case "sensitive_material":
+      return "background";
+  }
+}
+
 export type ContextPacketAssemblyOptions = {
   budgetTokens?: number;
   risks?: string[];
@@ -43,7 +56,7 @@ export type ContextPacketAssemblyHooks = {
   collect?(input: { event: OpenTagEvent; pointers: ContextPointer[] }): ContextPointer[];
   classify?(input: { event: OpenTagEvent; classified: ClassifiedContextPointer[] }): ClassifiedContextPointer[];
   filter?(input: { event: OpenTagEvent; classified: ClassifiedContextPointer[] }): ClassifiedContextPointer[];
-  preserve?(input: { event: OpenTagEvent; facts: Array<{ text: string; sourceUri?: string }> }): Array<{ text: string; sourceUri?: string }>;
+  preserve?(input: { event: OpenTagEvent; facts: ContextPacketFact[] }): ContextPacketFact[];
   summarize?(input: { event: OpenTagEvent; summary: string }): string;
   budget?(input: {
     event: OpenTagEvent;
@@ -137,16 +150,22 @@ export function filterClassifiedContextPointers(classified: ClassifiedContextPoi
   return classified.filter((entry) => entry.classification !== "background_noise" && entry.classification !== "sensitive_material");
 }
 
-export function preserveContextFacts(event: OpenTagEvent, classified: ClassifiedContextPointer[]): Array<{ text: string; sourceUri?: string }> {
+type ContextPacketFact = { text: string; sourceUri?: string; source?: ContextPointer; confidence?: ContextPacketFactConfidence };
+
+export function preserveContextFacts(event: OpenTagEvent, classified: ClassifiedContextPointer[]): ContextPacketFact[] {
   const sourceUri = classified[0]?.pointer.uri;
   return [
     {
       text: `Requested intent: ${event.command.intent}`,
-      ...(sourceUri ? { sourceUri } : {})
+      ...(sourceUri ? { sourceUri } : {}),
+      ...(classified[0]?.pointer ? { source: classified[0].pointer } : {}),
+      confidence: "observed"
     },
     ...classified.map((entry) => ({
       text: `${entry.classification}: ${entry.pointer.kind}`,
-      sourceUri: entry.pointer.uri
+      sourceUri: entry.pointer.uri,
+      source: entry.pointer,
+      confidence: "observed" as const
     }))
   ];
 }
@@ -186,6 +205,17 @@ export function assembleContextPacketFromEvent(
   const packet = {
     summary,
     sourcePointers: budgeted.map((entry) => entry.pointer),
+    intent: {
+      rawText: event.command.rawText,
+      normalizedIntent: event.command.intent,
+      requestedBy: event.actor
+    },
+    sources: budgeted.map((entry) => ({
+      pointer: entry.pointer,
+      role: contextPacketSourceRole(entry.classification),
+      included: true,
+      reason: entry.reason
+    })),
     facts,
     risks:
       options.risks ??
@@ -202,6 +232,22 @@ export function assembleContextPacketFromEvent(
     }
   };
   return options.hooks?.emit?.({ event, packet }) ?? packet;
+}
+
+export function defaultRunEventMetadata(type: string): {
+  visibility: "human" | "audit" | "debug";
+  importance: "low" | "normal" | "high" | "blocking";
+} {
+  const visibility = type.startsWith("callback.") ? "human" : type.startsWith("executor.log") ? "debug" : "audit";
+  const importance =
+    type === "run.waiting_for_permission"
+      ? "blocking"
+      : type === "run.completed" || type.startsWith("callback.final")
+        ? "high"
+        : type === "run.created"
+          ? "low"
+          : "normal";
+  return { visibility, importance };
 }
 
 export const DefaultCapabilityContracts = [
@@ -347,6 +393,10 @@ export function primaryConversationAnchorFromEvent(event: OpenTagEvent): Convers
     canApprove: true,
     ...(structuredThreadKey ? { threadKey: structuredThreadKey } : {})
   };
+}
+
+export function conversationKeyFromEvent(event: OpenTagEvent): string {
+  return `${event.callback.provider}:${event.callback.threadKey ?? event.callback.uri}`;
 }
 
 export function workThreadFromEvent(event: OpenTagEvent): WorkThread | undefined {

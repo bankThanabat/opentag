@@ -1,7 +1,9 @@
 import {
+  FollowUpRequestSchema,
   OpenTagEventSchema,
   OpenTagRunResultSchema,
   OpenTagRunSchema,
+  RunAdmissionDecisionSchema,
   type ActorIdentity,
   type ActionHint,
   type AdapterMutationMapping,
@@ -93,10 +95,22 @@ export type CreateRunInput = {
   event: OpenTagEvent;
 };
 
-export type CreateRunResult = {
-  run: OpenTagRun;
-  idempotentReplay?: boolean;
-};
+export type CreateRunResult =
+  | {
+      outcome: "run_created";
+      decision: import("@opentag/core").RunAdmissionDecision;
+      run: OpenTagRun;
+      idempotentReplay?: boolean;
+    }
+  | {
+      outcome: "follow_up_queued";
+      decision: import("@opentag/core").RunAdmissionDecision;
+      followUpRequest: import("@opentag/core").FollowUpRequest;
+    }
+  | {
+      outcome: "needs_human_decision";
+      decision: import("@opentag/core").RunAdmissionDecision;
+    };
 
 export type ApprovalDecisionInput = {
   id?: string;
@@ -170,6 +184,8 @@ export type OpenTagClient = {
   bindSlackChannel(input: SlackChannelBindingInput): Promise<void>;
   getSlackChannelBinding(input: { teamId: string; channelId: string }): Promise<{ binding: SlackChannelBindingInput }>;
   createRun(input: CreateRunInput): Promise<CreateRunResult>;
+  getFollowUpRequest(input: { id: string }): Promise<{ followUpRequest: import("@opentag/core").FollowUpRequest }>;
+  createRunFromFollowUpRequest(input: { id: string; runId: string }): Promise<{ followUpRequest: import("@opentag/core").FollowUpRequest; run: OpenTagRun }>;
   claim(input: { runnerId: string }): Promise<ClaimedOpenTagRun | null>;
   heartbeat(input: { runnerId: string; runId: string }): Promise<void>;
   markRunning(input: { runnerId: string; runId: string; executor: string }): Promise<void>;
@@ -344,10 +360,54 @@ export function createOpenTagClient(options: OpenTagClientOptions): OpenTagClien
         body: JSON.stringify({ runId: input.runId, event })
       });
       await assertOk(response, "createRun");
-      const body = (await response.json()) as { run: unknown; idempotentReplay?: unknown };
+      const body = (await response.json()) as {
+        decision: unknown;
+        run?: unknown;
+        followUpRequest?: unknown;
+        idempotentReplay?: unknown;
+      };
+      const decision = RunAdmissionDecisionSchema.parse(body.decision);
+      if (body.run) {
+        return {
+          outcome: "run_created",
+          decision,
+          run: OpenTagRunSchema.parse(body.run),
+          ...(body.idempotentReplay === true ? { idempotentReplay: true } : {})
+        };
+      }
+      if (body.followUpRequest) {
+        return {
+          outcome: "follow_up_queued",
+          decision,
+          followUpRequest: FollowUpRequestSchema.parse(body.followUpRequest)
+        };
+      }
       return {
-        run: OpenTagRunSchema.parse(body.run),
-        ...(body.idempotentReplay === true ? { idempotentReplay: true } : {})
+        outcome: "needs_human_decision",
+        decision
+      };
+    },
+
+    async getFollowUpRequest(input) {
+      const response = await fetchImpl(`${baseUrl}/v1/follow-up-requests/${input.id}`, {
+        headers: authHeaders(options.pairingToken)
+      });
+      await assertOk(response, "getFollowUpRequest");
+      const body = (await response.json()) as { followUpRequest: unknown };
+      return { followUpRequest: FollowUpRequestSchema.parse(body.followUpRequest) };
+    },
+
+    async createRunFromFollowUpRequest(input) {
+      const response = await fetchImpl(`${baseUrl}/v1/follow-up-requests/${input.id}/create-run`, {
+        method: "POST",
+        headers: jsonHeaders(options.pairingToken),
+        body: JSON.stringify({ runId: input.runId })
+      });
+      await assertOk(response, "createRunFromFollowUpRequest");
+      const body = (await response.json()) as { followUpRequest: unknown; run: unknown };
+      return {
+        followUpRequest: FollowUpRequestSchema.parse(body.followUpRequest),
+        run: OpenTagRunSchema.parse(body.run)
       };
     },
 

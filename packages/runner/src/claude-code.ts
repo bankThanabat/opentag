@@ -1,6 +1,6 @@
 import type { ContextPointer } from "@opentag/core";
 import { assertCommandSucceeded, nodeCommandRunner, type CommandRunner } from "./command.js";
-import type { ExecutorAdapter } from "./executor.js";
+import { renderContextPacketForPrompt, type ExecutorAdapter } from "./executor.js";
 import { branchNameForRun, changedFiles, cleanupInternalArtifacts, createRunBranch } from "./git.js";
 import { createExecutorRunResult } from "./result.js";
 
@@ -21,6 +21,7 @@ function buildPrompt(input: {
   runId: string;
   rawText: string;
   context: ContextPointer[];
+  contextPacket: import("@opentag/core").ContextPacket | undefined;
 }): string {
   return [
     "You are executing an OpenTag run in a local checkout.",
@@ -29,6 +30,8 @@ function buildPrompt(input: {
     "User request:",
     input.rawText,
     "",
+    ...renderContextPacketForPrompt(input.contextPacket),
+    ...(input.contextPacket ? [""] : []),
     "Context pointers:",
     contextLines(input.context),
     "",
@@ -98,7 +101,8 @@ export function createClaudeCodeExecutor(options: ClaudeCodeExecutorOptions = {}
         input: buildPrompt({
           runId: input.runId,
           rawText: input.command.rawText,
-          context: input.context
+          context: input.context,
+          contextPacket: input.contextPacket
         })
       });
       await assertCommandSucceeded(claudeResult, "claude --print");

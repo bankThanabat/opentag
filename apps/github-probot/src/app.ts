@@ -21,7 +21,7 @@ type PullRequestReviewCommentPayload = {
 
 export async function handleIssueCommentCreated(input: {
   payload: IssueCommentPayload;
-  createRun(event: OpenTagEvent): Promise<{ runId: string }>;
+  createRun(event: OpenTagEvent): Promise<{ runId?: string }>;
   postComment(body: string): Promise<void>;
   now(): string;
   dispatcherOwnsCallbacks?: boolean;
@@ -45,14 +45,14 @@ export async function handleIssueCommentCreated(input: {
   if (!event) return;
 
   const { runId } = await input.createRun(event);
-  if (!input.dispatcherOwnsCallbacks) {
+  if (runId && !input.dispatcherOwnsCallbacks) {
     await input.postComment(renderAcknowledgement(runId));
   }
 }
 
 export async function handlePullRequestReviewCommentCreated(input: {
   payload: PullRequestReviewCommentPayload;
-  createRun(event: OpenTagEvent): Promise<{ runId: string }>;
+  createRun(event: OpenTagEvent): Promise<{ runId?: string }>;
   postComment(body: string): Promise<void>;
   now(): string;
   dispatcherOwnsCallbacks?: boolean;
@@ -78,12 +78,12 @@ export async function handlePullRequestReviewCommentCreated(input: {
   if (!event) return;
 
   const { runId } = await input.createRun(event);
-  if (!input.dispatcherOwnsCallbacks) {
+  if (runId && !input.dispatcherOwnsCallbacks) {
     await input.postComment(renderAcknowledgement(runId));
   }
 }
 
-async function createDispatcherRun(input: { event: OpenTagEvent; log: { warn(data: unknown, message: string): void } }): Promise<{ runId: string }> {
+async function createDispatcherRun(input: { event: OpenTagEvent; log: { warn(data: unknown, message: string): void } }): Promise<{ runId?: string }> {
   const dispatcherUrl = process.env.OPENTAG_DISPATCHER_URL;
   const runId = `run_${Date.now()}`;
   if (!dispatcherUrl) {
@@ -91,14 +91,15 @@ async function createDispatcherRun(input: { event: OpenTagEvent; log: { warn(dat
     return { runId };
   }
 
-  await createOpenTagClient({
+  const client = createOpenTagClient({
     dispatcherUrl,
     ...(process.env.OPENTAG_DISPATCHER_TOKEN ? { pairingToken: process.env.OPENTAG_DISPATCHER_TOKEN } : {})
-  }).createRun({
+  });
+  const created = await client.createRun({
     runId,
     event: input.event
   });
-  return { runId };
+  return created.outcome === "run_created" ? { runId: created.run.id } : {};
 }
 
 export function createOpenTagProbotApp(app: Probot): void {
