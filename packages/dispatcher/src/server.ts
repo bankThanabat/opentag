@@ -234,7 +234,7 @@ export async function processPendingCallbacks(input: {
   retry?: CallbackRetryOptions;
 }): Promise<{ processed: number; delivered: number; failed: number }> {
   const maxAttempts = input.retry?.maxAttempts ?? 5;
-  const deliveries = await input.repo.listPendingCallbackDeliveries({
+  const deliveries = await input.repo.claimPendingCallbackDeliveries({
     limit: input.limit ?? 20,
     ...(input.retry?.now ? { now: input.retry.now } : {}),
     maxAttempts
@@ -433,9 +433,8 @@ export function createDispatcherApp(input: {
       return c.json({ error: "actor_not_allowed_for_write" }, 403);
     }
 
-    const run = await repo.createRun({ id: parsed.runId, event: parsed.event });
-    const idempotentReplay = run.id !== parsed.runId;
-    if (idempotentReplay) {
+    const { run, created } = await repo.createRun({ id: parsed.runId, event: parsed.event });
+    if (!created) {
       return c.json({ run, idempotentReplay: true }, 200);
     }
     await deliverAndAudit({
@@ -700,7 +699,7 @@ export function createDispatcherApp(input: {
     if (!parent) return c.json({ error: "parent_run_not_found" }, 404);
     const receivedAt = new Date().toISOString();
     const sourceProposalId = body.sourceProposalId ?? body.action.targetId;
-    const run = await repo.createRun({
+    const { run } = await repo.createRun({
       id: body.runId,
       event: childEventFromParent({
         parentEvent: parent.event,

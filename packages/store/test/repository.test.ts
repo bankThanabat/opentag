@@ -181,6 +181,28 @@ describe("OpenTag repository", () => {
     });
   });
 
+  it("claims pending callback deliveries only once", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.enqueueCallbackDelivery({
+      runId: "run_delivery",
+      kind: "acknowledgement",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "hello"
+    });
+
+    const first = await repo.claimPendingCallbackDeliveries({ limit: 10 });
+    const second = await repo.claimPendingCallbackDeliveries({ limit: 10 });
+
+    expect(first).toHaveLength(1);
+    expect(first[0]?.status).toBe("delivering");
+    expect(second).toEqual([]);
+  });
+
   it("replays createRun idempotently for the same source event", async () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);
@@ -204,8 +226,10 @@ describe("OpenTag repository", () => {
     const first = await repo.createRun({ id: "run_duplicate_1", event: githubEvent });
     const second = await repo.createRun({ id: "run_duplicate_2", event: githubEvent });
 
-    expect(first.id).toBe("run_duplicate_1");
-    expect(second.id).toBe("run_duplicate_1");
+    expect(first.run.id).toBe("run_duplicate_1");
+    expect(first.created).toBe(true);
+    expect(second.run.id).toBe("run_duplicate_1");
+    expect(second.created).toBe(false);
 
     const events = await repo.listRunEvents({ runId: "run_duplicate_1" });
     expect(events.map((event) => event.type)).toContain("run.create_idempotent_replay");

@@ -12,6 +12,13 @@ const ClaudeCodeExecutorConfigSchema = z.object({
   dangerouslySkipPermissions: z.boolean().optional()
 });
 
+const RunnerSecurityPolicySchema = z.object({
+  mode: z.enum(["enforce", "audit", "off"]).optional(),
+  allowedWorkspaceRoot: z.string().min(1).optional(),
+  allowUnsafePrompts: z.boolean().optional(),
+  extraSafeEnv: z.array(z.string().min(1)).optional()
+});
+
 export const RepositoryBindingConfigSchema = z.object({
   provider: z.string().min(1).default("github"),
   owner: z.string().min(1),
@@ -37,6 +44,7 @@ export const OpenTagDaemonConfigSchema = z.object({
   repositories: z.array(RepositoryBindingConfigSchema).default([]),
   slackChannels: z.array(SlackChannelBindingConfigSchema).optional(),
   claudeCode: ClaudeCodeExecutorConfigSchema.optional(),
+  security: RunnerSecurityPolicySchema.optional(),
   githubToken: z.string().min(1).optional(),
   allowAutoCreatePullRequest: z.boolean().optional(),
   pairingToken: z.string().min(1).optional(),
@@ -115,6 +123,15 @@ function claudePermissionModeFromEnv(value: string | undefined) {
   return parsed.data;
 }
 
+function extraSafeEnvFromEnv(value: string | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const names = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return names.length > 0 ? names : undefined;
+}
+
 export function loadConfigFromEnv(): OpenTagDaemonConfig {
   const configPath = process.env.OPENTAG_CONFIG_PATH;
   if (configPath) {
@@ -169,6 +186,27 @@ export function loadConfigFromEnv(): OpenTagDaemonConfig {
             ...(claudePermissionMode ? { permissionMode: claudePermissionMode } : {}),
             ...(process.env.OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS
               ? { dangerouslySkipPermissions: process.env.OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS === "true" }
+              : {})
+          }
+        }
+      : {}),
+    ...(process.env.OPENTAG_SECURITY_MODE ||
+    process.env.OPENTAG_ALLOWED_WORKSPACE_ROOT ||
+    process.env.OPENTAG_ALLOW_UNSAFE_PROMPTS ||
+    process.env.OPENTAG_EXTRA_SAFE_ENV
+      ? {
+          security: {
+            ...(process.env.OPENTAG_SECURITY_MODE
+              ? { mode: process.env.OPENTAG_SECURITY_MODE as "enforce" | "audit" | "off" }
+              : {}),
+            ...(process.env.OPENTAG_ALLOWED_WORKSPACE_ROOT
+              ? { allowedWorkspaceRoot: process.env.OPENTAG_ALLOWED_WORKSPACE_ROOT }
+              : {}),
+            ...(process.env.OPENTAG_ALLOW_UNSAFE_PROMPTS
+              ? { allowUnsafePrompts: process.env.OPENTAG_ALLOW_UNSAFE_PROMPTS === "true" }
+              : {}),
+            ...(extraSafeEnvFromEnv(process.env.OPENTAG_EXTRA_SAFE_ENV)
+              ? { extraSafeEnv: extraSafeEnvFromEnv(process.env.OPENTAG_EXTRA_SAFE_ENV) }
               : {})
           }
         }

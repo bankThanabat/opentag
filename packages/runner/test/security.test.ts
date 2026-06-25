@@ -66,6 +66,21 @@ describe("runner security", () => {
     expect(assessment.findings.map((finding) => finding.code)).toContain("context.file_outside_workspace");
   });
 
+  it("blocks execution paths outside the allowed workspace root", () => {
+    const assessment = assessRunnerSecurity({
+      executorId: "codex",
+      workspacePath: "/tmp/demo",
+      executionPath: "/tmp/outside/run-worktree",
+      command: { rawText: "fix this", intent: "fix", args: {} },
+      context: [],
+      permissions: [{ scope: "repo:write", reason: "write branch" }],
+      policy: { allowedWorkspaceRoot: "/tmp/demo" }
+    });
+
+    expect(assessment.allowed).toBe(false);
+    expect(assessment.findings.map((finding) => finding.code)).toContain("execution.outside_allowed_root");
+  });
+
   it("scrubs sensitive environment variables before spawning local executors", () => {
     const scrubbed = scrubEnvironment(
       {

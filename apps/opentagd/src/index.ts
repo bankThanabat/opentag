@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { writeFileSync } from "node:fs";
-import { createClaudeCodeExecutor, createCodexExecutor, createEchoExecutor } from "@opentag/runner";
+import { chmodSync } from "node:fs";
+import { createClaudeCodeExecutor, createCodexExecutor, createEchoExecutor, type RunnerSecurityPolicy } from "@opentag/runner";
 import { createDispatcherAdminClient, createDispatcherClient } from "@opentag/client";
 import { Command } from "commander";
 import { createInitialConfig, formatConfigError, loadConfigFromEnv } from "./config.js";
@@ -18,10 +19,24 @@ function loadConfigOrExit() {
   }
 }
 
+function securityFromConfig(config: ReturnType<typeof loadConfigFromEnv>): RunnerSecurityPolicy | undefined {
+  const security = config.security;
+  if (!security) return undefined;
+  const normalized: RunnerSecurityPolicy = {};
+  if (security.mode !== undefined) normalized.mode = security.mode;
+  if (security.allowedWorkspaceRoot !== undefined) normalized.allowedWorkspaceRoot = security.allowedWorkspaceRoot;
+  if (security.allowUnsafePrompts !== undefined) normalized.allowUnsafePrompts = security.allowUnsafePrompts;
+  if (security.extraSafeEnv !== undefined) normalized.extraSafeEnv = security.extraSafeEnv;
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 function executorsFromConfig(config: ReturnType<typeof loadConfigFromEnv>) {
+  const security = securityFromConfig(config);
   return {
     echo: createEchoExecutor(),
-    codex: createCodexExecutor(),
+    codex: createCodexExecutor({
+      ...(security ? { security } : {})
+    }),
     "claude-code": createClaudeCodeExecutor({
       ...(config.claudeCode?.command ? { claudeCommand: config.claudeCode.command } : {}),
       ...(config.claudeCode?.model ? { model: config.claudeCode.model } : {}),
@@ -81,6 +96,7 @@ program
         keepWorktree: options.keepWorktree
       });
       writeFileSync(options.output, `${JSON.stringify(config, null, 2)}\n`);
+      chmodSync(options.output, 0o600);
       console.log(`Wrote OpenTag config to ${options.output}`);
     } catch (error) {
       console.error(`Could not create config:\n${formatConfigError(error)}`);
@@ -169,10 +185,12 @@ program
   .description("Claim and execute one run if available")
   .action(async () => {
     const config = loadConfigOrExit();
+    const security = securityFromConfig(config);
     const didWork = await runOneDaemonIteration({
       runnerId: config.runnerId,
       repositories: config.repositories,
       executors: executorsFromConfig(config),
+      ...(security ? { security } : {}),
       pullRequestOptions: {
         ...(config.githubToken ? { githubToken: config.githubToken } : {}),
         ...(config.allowAutoCreatePullRequest !== undefined ? { allowAutoCreatePullRequest: config.allowAutoCreatePullRequest } : {})
@@ -192,10 +210,12 @@ program
   .description("Continuously poll for and execute OpenTag runs")
   .action(async () => {
     const config = loadConfigOrExit();
+    const security = securityFromConfig(config);
     await serveDaemon({
       runnerId: config.runnerId,
       repositories: config.repositories,
       executors: executorsFromConfig(config),
+      ...(security ? { security } : {}),
       ...(config.githubToken
         ? {
             pullRequestOptions: {

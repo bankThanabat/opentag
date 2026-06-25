@@ -70,9 +70,15 @@ export function createCodexExecutor(options: CodexExecutorOptions = {}): Executo
     },
     async run(input, sink) {
       const security = options.security;
+      const worktreePath = worktreePathForRun({
+        workspacePath: input.workspacePath,
+        runId: input.runId,
+        ...(input.worktreeRoot ? { worktreeRoot: input.worktreeRoot } : {})
+      });
       const assessment = assessRunnerSecurity({
         executorId: "codex",
         workspacePath: input.workspacePath,
+        executionPath: worktreePath,
         command: input.command,
         context: input.context,
         ...(input.permissions ? { permissions: input.permissions } : {}),
@@ -96,11 +102,6 @@ export function createCodexExecutor(options: CodexExecutorOptions = {}): Executo
       const branchName = branchNameForRun(input.runId);
       const baseBranch = input.baseBranch ?? "main";
       const keepWorktree = input.keepWorktree ?? "on_failure";
-      const worktreePath = worktreePathForRun({
-        workspacePath: input.workspacePath,
-        runId: input.runId,
-        ...(input.worktreeRoot ? { worktreeRoot: input.worktreeRoot } : {})
-      });
       let completed = false;
 
       await sink.emit({

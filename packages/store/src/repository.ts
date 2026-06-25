@@ -62,7 +62,7 @@ export type OpenTagAuditEvent = {
 
 export type CallbackDeliveryKind = "acknowledgement" | "progress" | "final";
 export type CallbackDeliveryProvider = "github" | "slack" | "lark" | "webhook";
-export type CallbackDeliveryStatus = "pending" | "delivered" | "failed";
+export type CallbackDeliveryStatus = "pending" | "delivering" | "delivered" | "failed";
 
 export type CallbackDelivery = {
   id: number;
@@ -118,6 +118,11 @@ export type ApplyOutcomeCounts = {
   failed: number;
   stale: number;
   unsupported: number;
+};
+
+export type CreateRunResult = {
+  run: OpenTagRun;
+  created: boolean;
 };
 
 export type OpenTagRunMetrics = {
@@ -573,7 +578,7 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       triggeredByAction?: ActionHint;
       sourceProposalId?: string;
       sourceApplyPlanId?: string;
-    }): Promise<OpenTagRun> {
+    }): Promise<CreateRunResult> {
       const event = OpenTagEventSchema.parse(input.event);
       const triggeredByAction = input.triggeredByAction ? ActionHintSchema.parse(input.triggeredByAction) : undefined;
       const createdAt = nowIso();
@@ -611,7 +616,7 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
           importance: "low",
           createdAt
         });
-        return runFromRow(existingBySourceEvent);
+        return { run: runFromRow(existingBySourceEvent), created: false };
       }
       await appendRunEvent({
         runId: input.id,
@@ -650,16 +655,19 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         });
       }
       return {
-        id: input.id,
-        eventId: event.id,
-        status: "queued",
-        ...protocolFields,
-        ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
-        ...(triggeredByAction ? { triggeredByAction } : {}),
-        ...(input.sourceProposalId ? { sourceProposalId: input.sourceProposalId } : {}),
-        ...(input.sourceApplyPlanId ? { sourceApplyPlanId: input.sourceApplyPlanId } : {}),
-        createdAt,
-        updatedAt: createdAt
+        run: {
+          id: input.id,
+          eventId: event.id,
+          status: "queued",
+          ...protocolFields,
+          ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
+          ...(triggeredByAction ? { triggeredByAction } : {}),
+          ...(input.sourceProposalId ? { sourceProposalId: input.sourceProposalId } : {}),
+          ...(input.sourceApplyPlanId ? { sourceApplyPlanId: input.sourceApplyPlanId } : {}),
+          createdAt,
+          updatedAt: createdAt
+        },
+        created: true
       };
     },
 
@@ -822,16 +830,17 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
 
     async markRunning(input: { runId: string; executor: string; runnerId?: string }): Promise<boolean> {
       const updatedAt = nowIso();
+      const conditions = [eq(runs.id, input.runId)];
       if (input.runnerId) {
-        const row = await db
-          .select()
-          .from(runs)
-          .where(and(eq(runs.id, input.runId), eq(runs.assignedRunnerId, input.runnerId)))
-          .limit(1)
-          .get();
-        if (!row) return false;
+        conditions.push(eq(runs.assignedRunnerId, input.runnerId));
       }
-      await db.update(runs).set({ status: "running", executor: input.executor, updatedAt }).where(eq(runs.id, input.runId));
+      const updateResult = await db
+        .update(runs)
+        .set({ status: "running", executor: input.executor, updatedAt })
+        .where(and(...conditions));
+      if (updateResult.changes === 0) {
+        return false;
+      }
       await appendRunEvent({
         runId: input.runId,
         type: "run.running",
@@ -856,6 +865,7 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
               : "failed";
       const runRow = await db.select().from(runs).where(eq(runs.id, input.runId)).limit(1).get();
       if (!runRow) {
+        if (input.runnerId) return false;
         throw new Error(`Run not found: ${input.runId}`);
       }
       if (input.runnerId && runRow.assignedRunnerId !== input.runnerId) {
@@ -864,7 +874,15 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       const runThread = runRow ? protocolRunFieldsFromEvent(OpenTagEventSchema.parse(JSON.parse(runRow.eventJson)), runRow.createdAt).thread : undefined;
       await db
         .update(runs)
-        .set({ status, resultJson: JSON.stringify(result), leaseExpiresAt: null, heartbeatAt: null, updatedAt })
+        .set({
+          status,
+          resultJson: JSON.stringify(result),
+          assignedRunnerId: null,
+          leasedAt: null,
+          leaseExpiresAt: null,
+          heartbeatAt: null,
+          updatedAt
+        })
         .where(eq(runs.id, input.runId));
       for (const snapshot of result.suggestedChanges ?? []) {
         const parsedSnapshot = SuggestedChangesSnapshotSchema.parse({
@@ -1383,6 +1401,39 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
         .filter((delivery) => delivery.attempts < maxAttempts)
         .filter((delivery) => !delivery.nextAttemptAt || new Date(delivery.nextAttemptAt).getTime() <= now.getTime())
         .slice(0, input.limit);
+    },
+
+    async claimPendingCallbackDeliveries(input: { limit: number; now?: Date; maxAttempts?: number }): Promise<CallbackDelivery[]> {
+      const now = input.now ?? new Date();
+      const maxAttempts = input.maxAttempts ?? Number.POSITIVE_INFINITY;
+      const rows = await db
+        .select()
+        .from(callbackDeliveries)
+        .where(inArray(callbackDeliveries.status, ["pending", "failed"]))
+        .orderBy(asc(callbackDeliveries.id));
+
+      const claimed: CallbackDelivery[] = [];
+      for (const row of rows) {
+        const delivery = callbackDeliveryFromRow(row);
+        if (delivery.attempts >= maxAttempts) continue;
+        if (delivery.nextAttemptAt && new Date(delivery.nextAttemptAt).getTime() > now.getTime()) continue;
+
+        const updatedAt = nowIso();
+        const claimResult = await db
+          .update(callbackDeliveries)
+          .set({ status: "delivering", updatedAt })
+          .where(and(eq(callbackDeliveries.id, row.id), inArray(callbackDeliveries.status, ["pending", "failed"])));
+        if (claimResult.changes === 0) continue;
+
+        claimed.push({
+          ...delivery,
+          status: "delivering",
+          updatedAt
+        });
+        if (claimed.length >= input.limit) break;
+      }
+
+      return claimed;
     },
 
     async getRunMetrics(input: { runId: string }): Promise<OpenTagRunMetrics> {

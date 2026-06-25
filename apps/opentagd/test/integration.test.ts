@@ -99,4 +99,91 @@ describe("opentagd local integration", () => {
       "callback.final.delivered"
     ]);
   });
+
+  it("blocks a write-capable run through the daemon security gate and records the blocked path", async () => {
+    const delivered: string[] = [];
+    const app = createDispatcherApp({
+      databasePath: ":memory:",
+      callbackSink: {
+        async deliver(message) {
+          delivered.push(`${message.kind}:${message.body}`);
+        }
+      }
+    });
+    const fetchImpl = fetchForApp(app);
+    const dispatcherUrl = "http://dispatcher.test";
+    const admin = createDispatcherAdminClient({ dispatcherUrl, runnerId: "runner_1", fetchImpl });
+    const client = createOpenTagClient({ dispatcherUrl, fetchImpl });
+
+    await admin.registerRunner("Local Runner");
+    await admin.bindRepository({
+      provider: "github",
+      owner: "acme",
+      repo: "demo",
+      checkoutPath: "/tmp/demo",
+      defaultExecutor: "codex"
+    });
+    await client.createRun({
+      runId: "run_blocked",
+      event: {
+        ...event,
+        id: "evt_blocked",
+        sourceEventId: "comment_blocked",
+        command: { rawText: "fix this", intent: "fix", args: {} }
+      }
+    });
+
+    const didWork = await runOneDaemonIteration({
+      runnerId: "runner_1",
+      repositories: [
+        {
+          provider: "github",
+          owner: "acme",
+          repo: "demo",
+          checkoutPath: "/tmp/demo",
+          defaultExecutor: "codex",
+          baseBranch: "main",
+          pushRemote: "origin"
+        }
+      ],
+      executors: {
+        codex: {
+          id: "codex",
+          displayName: "Codex",
+          async canRun() {
+            throw new Error("should not reach executor readiness");
+          },
+          async run() {
+            throw new Error("should not reach executor run");
+          },
+          async cancel() {
+            return;
+          }
+        }
+      },
+      client: createDispatcherClient({ dispatcherUrl, runnerId: "runner_1", fetchImpl })
+    });
+
+    expect(didWork).toBe(true);
+    const stored = await client.getRun({ runId: "run_blocked" });
+    expect(stored.run.status).toBe("needs_approval");
+    expect(stored.run.result?.conclusion).toBe("needs_human");
+    expect(stored.run.result?.summary).toContain("permission.repo_write_required");
+
+    const { events } = await client.listRunEvents({ runId: "run_blocked" });
+    expect(events.map((item) => (item as { type: string }).type)).toEqual([
+      "run.created",
+      "context_packet.generated",
+      "callback.acknowledgement.queued",
+      "callback.acknowledgement.delivered",
+      "run.claimed",
+      "run.progress",
+      "callback.progress.queued",
+      "callback.progress.delivered",
+      "run.completed",
+      "callback.final.queued",
+      "callback.final.delivered"
+    ]);
+    expect(delivered.at(-1)?.toLowerCase()).toContain("needs_human");
+  });
 });

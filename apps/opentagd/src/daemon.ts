@@ -1,5 +1,11 @@
 import type { OpenTagEvent, OpenTagRun, OpenTagRunResult } from "@opentag/core";
-import { assessRunnerSecurity, formatSecurityAssessment, type ExecutorAdapter, type RunnerSecurityPolicy } from "@opentag/runner";
+import {
+  assessRunnerSecurity,
+  formatSecurityAssessment,
+  type ExecutorAdapter,
+  type RunnerSecurityPolicy,
+  worktreePathForRun
+} from "@opentag/runner";
 import type { RepositoryBindingConfig } from "./config.js";
 import { maybeCreatePullRequest, type PullRequestOptions } from "./pr.js";
 
@@ -64,9 +70,19 @@ export async function runOneDaemonIteration(input: {
     return true;
   }
 
+  const executionPath =
+    executorId === "codex"
+      ? worktreePathForRun({
+          workspacePath: binding.checkoutPath,
+          runId: claimed.run.id,
+          ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {})
+        })
+      : binding.checkoutPath;
+
   const securityAssessment = assessRunnerSecurity({
     executorId,
     workspacePath: binding.checkoutPath,
+    executionPath,
     command: claimed.event.command,
     context: claimed.event.context,
     permissions: claimed.event.permissions,
@@ -96,7 +112,7 @@ export async function runOneDaemonIteration(input: {
     permissions: claimed.event.permissions,
     ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {}),
     ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {}),
-    ...(binding.keepWorktree ? { keepWorktree: binding.keepWorktree } : {})
+    ...(binding.keepWorktree !== undefined ? { keepWorktree: binding.keepWorktree } : {})
   });
   if (!readiness.ready) {
     await input.client.complete(claimed.run.id, {
@@ -128,7 +144,7 @@ export async function runOneDaemonIteration(input: {
         permissions: claimed.event.permissions,
         ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {}),
         ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {}),
-        ...(binding.keepWorktree ? { keepWorktree: binding.keepWorktree } : {})
+        ...(binding.keepWorktree !== undefined ? { keepWorktree: binding.keepWorktree } : {})
       },
       {
         emit: async (event) => {

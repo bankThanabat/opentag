@@ -1,14 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createCodexExecutor } from "../src/codex.js";
 import type { CommandRunner } from "../src/command.js";
 import { branchNameForRun, commitRunChanges, parseChangedFiles, worktreePathForRun } from "../src/git.js";
 
+const ORIGINAL_OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+afterEach(() => {
+  if (ORIGINAL_OPENAI_API_KEY === undefined) {
+    delete process.env.OPENAI_API_KEY;
+  } else {
+    process.env.OPENAI_API_KEY = ORIGINAL_OPENAI_API_KEY;
+  }
+});
+
 describe("Codex executor", () => {
   it("creates an isolated worktree, runs codex exec, and reports changed files", async () => {
-    const calls: { command: string; args: string[]; input?: string }[] = [];
+    process.env.OPENAI_API_KEY = "sk-secret";
+    const calls: { command: string; args: string[]; input?: string; cwd?: string; env?: Record<string, string | undefined> }[] = [];
     const runner: CommandRunner = {
       async run(command, args, options) {
-        calls.push({ command, args, input: options?.input });
+        calls.push({ command, args, input: options?.input, cwd: options?.cwd, env: options?.env });
         if (command === "codex" && args.includes("--version")) {
           return { exitCode: 0, stdout: "codex 1.0.0", stderr: "" };
         }
@@ -94,9 +105,12 @@ describe("Codex executor", () => {
     expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "add -- src/demo.ts test/demo.test.ts")).toBe(true);
     expect(calls.some((call) => call.command === "git" && call.args.join(" ") === "commit -m OpenTag run run_1")).toBe(true);
     expect(calls.some((call) => call.command === "git" && call.args.join(" ") === `worktree remove --force ${worktreePath}`)).toBe(true);
-    expect(calls.find((call) => call.command === "codex" && call.args[0] === "exec")?.args).toContain("--full-auto");
-    expect(calls.find((call) => call.command === "codex" && call.args[0] === "exec")?.args).toContain("--ephemeral");
-    expect(calls.find((call) => call.command === "codex" && call.args[0] === "exec")?.input).toContain("fix this");
+    const codexExecCall = calls.find((call) => call.command === "codex" && call.args[0] === "exec");
+    expect(codexExecCall?.args).toContain("--full-auto");
+    expect(codexExecCall?.args).toContain("--ephemeral");
+    expect(codexExecCall?.input).toContain("fix this");
+    expect(codexExecCall?.cwd).toBe(worktreePath);
+    expect(codexExecCall?.env?.OPENAI_API_KEY).toBeUndefined();
     expect(events).toEqual(["executor.started", "executor.progress", "executor.progress", "executor.progress", "executor.completed"]);
     expect(result.changedFiles).toEqual(["src/demo.ts", "test/demo.test.ts"]);
     expect(result.summary).toContain("Implemented the requested fix.");

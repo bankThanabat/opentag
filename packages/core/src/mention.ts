@@ -161,13 +161,9 @@ function shouldConsumeContinuation(firstLine: string, remainingLines: string[]):
     return false;
   }
 
-  const { tokens } = tokenizeCommand(firstLine);
-  const firstToken = tokens[0]?.toLowerCase();
   const nextNonBlank = remainingLines.find((line) => line.trim().length > 0)?.trim();
   return (
     firstLine.trimEnd().endsWith("\\") ||
-    tokens.some((token) => token.startsWith("--")) ||
-    (tokens.length === 1 && firstToken !== undefined && isKnownIntent(firstToken)) ||
     nextNonBlank?.startsWith("--") === true
   );
 }
@@ -179,14 +175,11 @@ function collectContinuationLines(lines: string[], mention: string, skipLeadingB
 
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!started && trimmed.length === 0) {
-      continue;
-    }
     started = true;
-    if (trimmed.length === 0 || mentionPattern.test(trimmed)) {
+    if (mentionPattern.test(trimmed)) {
       break;
     }
-    collected.push(stripContinuationMarker(trimmed));
+    collected.push(trimmed.length === 0 ? "" : stripContinuationMarker(trimmed));
   }
 
   return collected;
@@ -197,7 +190,7 @@ function stripContinuationMarker(line: string): string {
 }
 
 function joinCommandLines(lines: string[]): string | null {
-  const joined = lines.filter((line) => line.length > 0).join("\n").trim();
+  const joined = lines.join("\n").trim();
   return joined.length > 0 ? joined : null;
 }
 
@@ -443,7 +436,7 @@ function enumValueForFlag<T extends string>(
   allowed: Set<T>,
   diagnostics: CommandParseDiagnostic[]
 ): T | undefined {
-  const value = stringValuesForFlag(flags, name)[0]?.toLowerCase();
+  const value = stringValuesForFlag(flags, name).at(-1)?.toLowerCase();
   if (!value) return undefined;
   if (allowed.has(value as T)) {
     return value as T;
@@ -461,7 +454,7 @@ function executorHintFromFlags(
   flags: Record<string, CommandFlagValue>,
   diagnostics: CommandParseDiagnostic[]
 ): AgentTarget["executorHint"] | undefined {
-  const value = stringValuesForFlag(flags, "executor")[0]?.toLowerCase();
+  const value = stringValuesForFlag(flags, "executor").at(-1)?.toLowerCase();
   if (!value) return undefined;
   if (EXECUTOR_HINTS.has(value as AgentTarget["executorHint"])) {
     return value as AgentTarget["executorHint"];
@@ -476,7 +469,7 @@ function executorHintFromFlags(
 }
 
 function lineFromFlag(flags: Record<string, CommandFlagValue>, diagnostics: CommandParseDiagnostic[]): number | undefined {
-  const value = valuesForFlag(flags, "line")[0];
+  const value = valuesForFlag(flags, "line").at(-1);
   if (value === undefined) return undefined;
   const line = typeof value === "number" ? value : Number(value);
   if (Number.isInteger(line) && line > 0) {
@@ -495,7 +488,7 @@ function rangeFromFlag(
   flags: Record<string, CommandFlagValue>,
   diagnostics: CommandParseDiagnostic[]
 ): { startLine: number; endLine: number } | undefined {
-  const value = valuesForFlag(flags, "range")[0];
+  const value = valuesForFlag(flags, "range").at(-1);
   if (value === undefined) return undefined;
   const match = String(value).match(/^(\d+)-(\d+)$/);
   if (!match?.[1] || !match[2]) {

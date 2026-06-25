@@ -177,4 +177,34 @@ describe("maybeCreatePullRequest", () => {
     expect(updated.createdPullRequestUrl).toBe("https://github.com/acme/demo/pull/2");
     expect(updated.artifacts?.at(-1)).toMatchObject({ kind: "pull_request", uri: "https://github.com/acme/demo/pull/2" });
   });
+
+  it("does not recommit files for Codex-generated branches before opening the pull request", async () => {
+    const commands: string[] = [];
+    await maybeCreatePullRequest({
+      run: { ...run, executor: "codex" },
+      event,
+      binding: {
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        checkoutPath: "/tmp/demo",
+        baseBranch: "main",
+        pushRemote: "origin"
+      },
+      result,
+      options: {
+        githubToken: "ghs_test",
+        allowAutoCreatePullRequest: true,
+        commandRunner: {
+          async run(command, args) {
+            commands.push(`${command} ${args.join(" ")}`);
+            return { exitCode: 0, stdout: "", stderr: "" };
+          }
+        },
+        fetchImpl: (async () => Response.json({ html_url: "https://github.com/acme/demo/pull/3" })) as typeof fetch
+      }
+    });
+
+    expect(commands).toEqual(["git push -u origin opentag/run_1"]);
+  });
 });

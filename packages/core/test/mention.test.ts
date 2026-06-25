@@ -45,4 +45,28 @@ describe("parseOpenTagMention", () => {
       }
     });
   });
+
+  it("keeps the last value for duplicate single-value flags", () => {
+    const parsed = parseOpenTagMention("@opentag fix auth --executor echo --executor codex");
+    expect(parsed).toMatchObject({
+      parsed: {
+        executorHint: "codex"
+      },
+      args: {
+        executor: "codex"
+      }
+    });
+  });
+
+  it("preserves blank lines in explicit continuations", () => {
+    const parsed = parseOpenTagMention("@opentag fix auth \\\n\n--file src/auth.ts");
+    expect(parsed).toMatchObject({
+      matched: true,
+      rawText: "fix auth\n\n--file src/auth.ts",
+      args: {
+        prompt: "auth",
+        file: "src/auth.ts"
+      }
+    });
+  });
 });

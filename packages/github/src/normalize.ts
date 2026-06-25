@@ -81,9 +81,12 @@ function contextPointersForCommand(command: OpenTagCommand, privateRepo: boolean
     if (reference.kind === "file" || reference.kind === "path") {
       context.push({
         kind: "file",
-        uri: uriWithLineFragment(reference.uri, reference.startLine, reference.endLine, reference.line),
+        uri: reference.uri,
+        ...(reference.line ? { line: reference.line } : {}),
+        ...(reference.startLine ? { startLine: reference.startLine } : {}),
+        ...(reference.endLine ? { endLine: reference.endLine } : {}),
         visibility,
-        title: reference.title ?? "Command file reference"
+        title: referenceTitle(reference)
       });
     }
   }
@@ -91,14 +94,8 @@ function contextPointersForCommand(command: OpenTagCommand, privateRepo: boolean
   return context;
 }
 
-function uriWithLineFragment(uri: string, startLine?: number, endLine?: number, line?: number): string {
-  if (startLine && endLine) {
-    return `${uri}#L${startLine}-L${endLine}`;
-  }
-  if (line) {
-    return `${uri}#L${line}`;
-  }
-  return uri;
+function referenceTitle(reference: NonNullable<OpenTagCommand["parsed"]>["references"][number]): string {
+  return reference.title ?? "Command file reference";
 }
 
 function commandMetadata(command: OpenTagCommand): Record<string, unknown> {

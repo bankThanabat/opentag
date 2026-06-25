@@ -26,34 +26,55 @@ async function checkGitCheckout(input: {
   }
   checks.push(check("ok", `${input.repository.owner}/${input.repository.repo} checkout`, input.repository.checkoutPath));
 
-  const gitRepo = await input.commandRunner.run("git", ["rev-parse", "--is-inside-work-tree"], {
-    cwd: input.repository.checkoutPath
-  });
-  if (gitRepo.exitCode !== 0 || gitRepo.stdout.trim() !== "true") {
-    checks.push(check("fail", `${input.repository.owner}/${input.repository.repo} git repo`, gitRepo.stderr || gitRepo.stdout || "Not a git repository."));
+  try {
+    const gitRepo = await input.commandRunner.run("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: input.repository.checkoutPath
+    });
+    if (gitRepo.exitCode !== 0 || gitRepo.stdout.trim() !== "true") {
+      checks.push(check("fail", `${input.repository.owner}/${input.repository.repo} git repo`, gitRepo.stderr || gitRepo.stdout || "Not a git repository."));
+      return checks;
+    }
+    checks.push(check("ok", `${input.repository.owner}/${input.repository.repo} git repo`, "Git checkout detected"));
+  } catch (error) {
+    checks.push(
+      check(
+        "fail",
+        `${input.repository.owner}/${input.repository.repo} git repo`,
+        error instanceof Error ? error.message : String(error)
+      )
+    );
     return checks;
   }
-  checks.push(check("ok", `${input.repository.owner}/${input.repository.repo} git repo`, "Git checkout detected"));
 
   const executor = input.executor;
   if (!executor) {
     checks.push(check("fail", `${input.repository.defaultExecutor} executor`, "No local executor is configured with this id."));
     return checks;
   }
-  const readiness = await executor.canRun({
-    runId: "doctor",
-    workspacePath: input.repository.checkoutPath,
-    ...(input.repository.baseBranch ? { baseBranch: input.repository.baseBranch } : {}),
-    ...(input.repository.worktreeRoot ? { worktreeRoot: input.repository.worktreeRoot } : {}),
-    ...(input.repository.keepWorktree ? { keepWorktree: input.repository.keepWorktree } : {}),
-    command: { rawText: "doctor", intent: "unknown", args: {} },
-    context: []
-  });
-  checks.push(
-    readiness.ready
-      ? check("ok", `${input.repository.defaultExecutor} executor`, `${executor.displayName} is ready`)
-      : check("fail", `${input.repository.defaultExecutor} executor`, readiness.reason ?? `${executor.displayName} is not ready`)
-  );
+  try {
+    const readiness = await executor.canRun({
+      runId: "doctor",
+      workspacePath: input.repository.checkoutPath,
+      ...(input.repository.baseBranch ? { baseBranch: input.repository.baseBranch } : {}),
+      ...(input.repository.worktreeRoot ? { worktreeRoot: input.repository.worktreeRoot } : {}),
+      ...(input.repository.keepWorktree ? { keepWorktree: input.repository.keepWorktree } : {}),
+      command: { rawText: "doctor", intent: "unknown", args: {} },
+      context: []
+    });
+    checks.push(
+      readiness.ready
+        ? check("ok", `${input.repository.defaultExecutor} executor`, `${executor.displayName} is ready`)
+        : check("fail", `${input.repository.defaultExecutor} executor`, readiness.reason ?? `${executor.displayName} is not ready`)
+    );
+  } catch (error) {
+    checks.push(
+      check(
+        "fail",
+        `${input.repository.defaultExecutor} executor`,
+        error instanceof Error ? error.message : String(error)
+      )
+    );
+  }
   return checks;
 }
 
@@ -138,7 +159,11 @@ export async function runDoctor(input: {
   }
 
   if (input.config.githubToken) {
-    checks.push(check("ok", "GitHub token", "Configured for PR creation"));
+    checks.push(
+      input.config.allowAutoCreatePullRequest
+        ? check("ok", "GitHub token", "Configured for PR creation")
+        : check("warn", "GitHub token", "Configured, but auto PR creation is disabled")
+    );
   } else {
     checks.push(check("warn", "GitHub token", "Not configured; PR creation will be skipped"));
   }

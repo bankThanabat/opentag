@@ -98,7 +98,6 @@ export function createSlackEventsApp(input: {
   }
 
   app.post("/slack/events", async (c) => {
-    const rawBody = await c.req.text();
     const timestamp = c.req.header("x-slack-request-timestamp");
     const signature = c.req.header("x-slack-signature");
     if (!timestamp || !signature) {
@@ -107,6 +106,7 @@ export function createSlackEventsApp(input: {
     if (!verifySlackTimestamp({ timestamp, nowMs: input.clock?.() ?? Date.now() })) {
       return c.json({ error: "stale_signature_timestamp" }, 401);
     }
+    const rawBody = await c.req.text();
     const payload = parseSlackPayload(rawBody);
     if (!payload) {
       return c.json({ error: "invalid_json" }, 400);

@@ -74,7 +74,7 @@ describe("Slack normalization", () => {
     );
     expect(event?.context).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "file", uri: "src/auth.ts#L12" })
+        expect.objectContaining({ kind: "file", uri: "src/auth.ts", line: 12 })
       ])
     );
   });

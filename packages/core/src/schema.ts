@@ -87,6 +87,9 @@ export const ContextPointerSchema = z.object({
     "text"
   ]),
   uri: z.string().min(1),
+  line: z.number().int().positive().optional(),
+  startLine: z.number().int().positive().optional(),
+  endLine: z.number().int().positive().optional(),
   title: z.string().min(1).optional(),
   visibility: z.enum(["public", "private", "organization"])
 });

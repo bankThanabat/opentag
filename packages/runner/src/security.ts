@@ -148,6 +148,7 @@ function scanTextForHighRiskPatterns(input: { command: OpenTagCommand; context: 
 export function assessRunnerSecurity(input: {
   executorId: string;
   workspacePath: string;
+  executionPath?: string;
   command: OpenTagCommand;
   context: ContextPointer[];
   permissions?: PermissionGrant[];
@@ -168,11 +169,19 @@ export function assessRunnerSecurity(input: {
   }
 
   const workspacePath = resolve(input.workspacePath);
+  const executionPath = resolve(input.executionPath ?? input.workspacePath);
   if (input.policy?.allowedWorkspaceRoot && !isPathInside(workspacePath, input.policy.allowedWorkspaceRoot)) {
     findings.push({
       code: "workspace.outside_allowed_root",
       severity: "block",
       message: "Workspace path is outside the configured allowed workspace root."
+    });
+  }
+  if (input.policy?.allowedWorkspaceRoot && !isPathInside(executionPath, input.policy.allowedWorkspaceRoot)) {
+    findings.push({
+      code: "execution.outside_allowed_root",
+      severity: "block",
+      message: "Execution path is outside the configured allowed workspace root."
     });
   }
 
