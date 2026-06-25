@@ -46,6 +46,7 @@ Add both repository and Slack channel bindings to `opentag.local.json`:
     {
       "teamId": "T123",
       "channelId": "C123",
+      "repoProvider": "github",
       "owner": "acme",
       "repo": "demo"
     }

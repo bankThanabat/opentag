@@ -157,7 +157,14 @@ program
       ...(config.pairingToken ? { pairingToken: config.pairingToken } : {})
     });
     for (const binding of config.slackChannels ?? []) {
-      await client.bindSlackChannel(binding);
+      await client.bindChannel({
+        provider: "slack",
+        accountId: binding.teamId,
+        conversationId: binding.channelId,
+        repoProvider: binding.repoProvider,
+        owner: binding.owner,
+        repo: binding.repo
+      });
       console.log(`Bound Slack ${binding.teamId}/${binding.channelId} to ${binding.owner}/${binding.repo}`);
     }
     if (!(config.slackChannels?.length ?? 0)) {

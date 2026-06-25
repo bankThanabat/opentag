@@ -1111,7 +1111,39 @@ describe("dispatcher API", () => {
     expect(events.map((event: { type: string }) => event.type)).toContain("run.heartbeat");
   });
 
-  it("stores and returns Slack channel bindings", async () => {
+  it("stores and returns generic channel bindings", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+
+    const create = await app.request("/v1/channel-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "telegram",
+        accountId: "bot_123",
+        conversationId: "chat_456",
+        repoProvider: "github",
+        owner: "acme",
+        repo: "demo",
+        metadata: { title: "Ops chat" }
+      })
+    });
+    expect(create.status).toBe(201);
+
+    const get = await app.request("/v1/channel-bindings/telegram/bot_123/chat_456");
+    expect(get.status).toBe(200);
+    const body = await get.json();
+    expect(body.binding).toEqual({
+      provider: "telegram",
+      accountId: "bot_123",
+      conversationId: "chat_456",
+      repoProvider: "github",
+      owner: "acme",
+      repo: "demo",
+      metadata: { title: "Ops chat" }
+    });
+  });
+
+  it("keeps Slack channel binding endpoints as compatibility wrappers", async () => {
     const app = createDispatcherApp({ databasePath: ":memory:" });
 
     const create = await app.request("/v1/slack-channel-bindings", {
@@ -1120,6 +1152,7 @@ describe("dispatcher API", () => {
       body: JSON.stringify({
         teamId: "T123",
         channelId: "C123",
+        repoProvider: "gitlab",
         owner: "acme",
         repo: "demo"
       })
@@ -1132,8 +1165,22 @@ describe("dispatcher API", () => {
     expect(body.binding).toEqual({
       teamId: "T123",
       channelId: "C123",
+      repoProvider: "gitlab",
       owner: "acme",
       repo: "demo"
+    });
+
+    const genericGet = await app.request("/v1/channel-bindings/slack/T123/C123");
+    expect(genericGet.status).toBe(200);
+    await expect(genericGet.json()).resolves.toEqual({
+      binding: {
+        provider: "slack",
+        accountId: "T123",
+        conversationId: "C123",
+        repoProvider: "gitlab",
+        owner: "acme",
+        repo: "demo"
+      }
     });
   });
 

@@ -8,6 +8,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${OPENTAG_RUNNER_ID:=runner_claude_local}"
 : "${OPENTAG_CLAUDE_PERMISSION_MODE:=acceptEdits}"
 
+DISPATCHER_PORT="${OPENTAG_DISPATCHER_PORT}"
+
 if ! command -v gh >/dev/null 2>&1; then
   echo "gh CLI not found. Install and authenticate GitHub CLI first." >&2
   exit 1
@@ -38,6 +40,11 @@ if [[ "${OPENTAG_GH_CREATE_PR:-false}" == "true" ]]; then
   PR_CREATE_PERMISSION=', { scope: "pr:create", reason: "open a pull request for completed code changes" }'
 fi
 
+if [[ ! -d "$CHECKOUT_PATH/.git" ]]; then
+  mkdir -p "$(dirname "$CHECKOUT_PATH")"
+  gh repo clone "${OWNER}/${REPO}" "$CHECKOUT_PATH" >/dev/null
+fi
+
 if [[ -z "$ISSUE_NUMBER" ]]; then
   if [[ "${OPENTAG_GH_CREATE_ISSUE:-false}" != "true" ]]; then
     echo "No OPENTAG_GH_TEST_ISSUE set and OPENTAG_GH_CREATE_ISSUE is not true." >&2
@@ -63,7 +70,7 @@ DATABASE_PATH="${OPENTAG_DATABASE_PATH:-opentag.gh-claude-local-test.db}"
 cat > "$CONFIG_PATH" <<JSON
 {
   "runnerId": "${OPENTAG_RUNNER_ID}",
-  "dispatcherUrl": "http://localhost:${OPENTAG_DISPATCHER_PORT}",
+  "dispatcherUrl": "http://localhost:${DISPATCHER_PORT}",
   "pairingToken": "${OPENTAG_PAIRING_TOKEN}",
   "githubToken": "${GITHUB_TOKEN}",
   "allowAutoCreatePullRequest": ${OPENTAG_GH_CREATE_PR:-false},
@@ -89,13 +96,72 @@ JSON
 
 cleanup() {
   rm -f "$CONFIG_PATH"
-  kill "$DISPATCHER_PID" 2>/dev/null || true
+  if [[ -n "${DISPATCHER_PID:-}" ]]; then
+    kill "$DISPATCHER_PID" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      if ! port_is_in_use "$DISPATCHER_PORT"; then
+        break
+      fi
+      sleep 0.25
+    done
+    if port_is_in_use "$DISPATCHER_PORT"; then
+      kill -9 "$DISPATCHER_PID" 2>/dev/null || true
+      for _ in $(seq 1 20); do
+        if ! port_is_in_use "$DISPATCHER_PORT"; then
+          break
+        fi
+        sleep 0.25
+      done
+    fi
+  fi
 }
 trap cleanup EXIT
 
-echo "Starting dispatcher on :${OPENTAG_DISPATCHER_PORT}"
+port_is_in_use() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -ti "tcp:${port}" >/dev/null 2>&1
+    return
+  fi
+  nc -z localhost "$port" >/dev/null 2>&1
+}
+
+dispatcher_pids_for_port() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -ti "tcp:${port}" 2>/dev/null || true
+    return
+  fi
+  pgrep -f "apps/dispatcher/src/index.ts" 2>/dev/null || true
+}
+
+echo "Starting dispatcher on :${DISPATCHER_PORT}"
+for pid in $(dispatcher_pids_for_port "${DISPATCHER_PORT}"); do
+  kill "$pid" 2>/dev/null || true
+done
+for _ in $(seq 1 20); do
+  if ! port_is_in_use "${DISPATCHER_PORT}"; then
+    break
+  fi
+  sleep 0.25
+done
+if port_is_in_use "${DISPATCHER_PORT}"; then
+  for pid in $(dispatcher_pids_for_port "${DISPATCHER_PORT}"); do
+    kill -9 "$pid" 2>/dev/null || true
+  done
+  for _ in $(seq 1 20); do
+    if ! port_is_in_use "${DISPATCHER_PORT}"; then
+      break
+    fi
+    sleep 0.25
+  done
+fi
+if port_is_in_use "${DISPATCHER_PORT}"; then
+  echo "Dispatcher port ${DISPATCHER_PORT} is still in use; free it or install lsof for more reliable cleanup." >&2
+  exit 1
+fi
 (
-  export PORT="$OPENTAG_DISPATCHER_PORT"
+  export PORT="$DISPATCHER_PORT"
   export OPENTAG_DATABASE_PATH="$DATABASE_PATH"
   export OPENTAG_PAIRING_TOKEN
   export OPENTAG_GITHUB_TOKEN="$GITHUB_TOKEN"
@@ -156,7 +222,7 @@ const body = {
   }
 };
 
-fetch("http://localhost:${OPENTAG_DISPATCHER_PORT}/v1/runs", {
+fetch("http://localhost:${DISPATCHER_PORT}/v1/runs", {
   method: "POST",
   headers: {
     "content-type": "application/json",

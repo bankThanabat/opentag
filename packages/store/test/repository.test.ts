@@ -160,7 +160,72 @@ describe("OpenTag repository", () => {
     expect(events.map((event) => event.type)).toContain("run.lease_expired");
   });
 
-  it("stores Slack channel to repo bindings", async () => {
+  it("stores generic channel to repo bindings", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.upsertChannelBinding({
+      provider: "telegram",
+      accountId: "bot_123",
+      conversationId: "chat_456",
+      repoProvider: "github",
+      owner: "acme",
+      repo: "demo",
+      metadata: { title: "Ops chat" }
+    });
+
+    await expect(repo.getChannelBinding({ provider: "telegram", accountId: "bot_123", conversationId: "chat_456" })).resolves.toEqual({
+      provider: "telegram",
+      accountId: "bot_123",
+      conversationId: "chat_456",
+      repoProvider: "github",
+      owner: "acme",
+      repo: "demo",
+      metadata: { title: "Ops chat" }
+    });
+  });
+
+  it("ignores malformed channel binding metadata instead of throwing", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    sqlite.exec(`
+      INSERT INTO channel_bindings (
+        provider,
+        account_id,
+        conversation_id,
+        repo_provider,
+        owner,
+        repo,
+        metadata_json,
+        created_at
+      ) VALUES (
+        'telegram',
+        'bot_123',
+        'chat_456',
+        'github',
+        'acme',
+        'demo',
+        '{bad-json',
+        '2026-06-25T00:00:00.000Z'
+      );
+    `);
+
+    await expect(repo.getChannelBinding({ provider: "telegram", accountId: "bot_123", conversationId: "chat_456" })).resolves.toEqual({
+      provider: "telegram",
+      accountId: "bot_123",
+      conversationId: "chat_456",
+      repoProvider: "github",
+      owner: "acme",
+      repo: "demo"
+    });
+  });
+
+  it("stores Slack channel bindings through the generic channel binding table", async () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);
     migrateSchema(sqlite);
@@ -169,6 +234,7 @@ describe("OpenTag repository", () => {
     await repo.createSlackChannelBinding({
       teamId: "T123",
       channelId: "C123",
+      repoProvider: "gitlab",
       owner: "acme",
       repo: "demo"
     });
@@ -176,8 +242,52 @@ describe("OpenTag repository", () => {
     await expect(repo.getSlackChannelBinding({ teamId: "T123", channelId: "C123" })).resolves.toEqual({
       teamId: "T123",
       channelId: "C123",
+      repoProvider: "gitlab",
       owner: "acme",
       repo: "demo"
+    });
+    await expect(repo.getChannelBinding({ provider: "slack", accountId: "T123", conversationId: "C123" })).resolves.toEqual({
+      provider: "slack",
+      accountId: "T123",
+      conversationId: "C123",
+      repoProvider: "gitlab",
+      owner: "acme",
+      repo: "demo"
+    });
+  });
+
+  it("preserves generic metadata when Slack compatibility upserts the same binding", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.upsertChannelBinding({
+      provider: "slack",
+      accountId: "T123",
+      conversationId: "C123",
+      repoProvider: "github",
+      owner: "acme",
+      repo: "demo",
+      metadata: { source: "seed", labels: ["triage"] }
+    });
+
+    await repo.createSlackChannelBinding({
+      teamId: "T123",
+      channelId: "C123",
+      repoProvider: "gitlab",
+      owner: "acme",
+      repo: "demo"
+    });
+
+    await expect(repo.getChannelBinding({ provider: "slack", accountId: "T123", conversationId: "C123" })).resolves.toEqual({
+      provider: "slack",
+      accountId: "T123",
+      conversationId: "C123",
+      repoProvider: "gitlab",
+      owner: "acme",
+      repo: "demo",
+      metadata: { source: "seed", labels: ["triage"] }
     });
   });
 

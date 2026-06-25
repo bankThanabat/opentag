@@ -60,6 +60,7 @@ Add Slack channel bindings when a chat surface should route work to a repository
     {
       "teamId": "T123",
       "channelId": "C123",
+      "repoProvider": "github",
       "owner": "acme",
       "repo": "demo"
     }
@@ -100,7 +101,7 @@ Use daemon security settings to keep executor runs constrained:
 | `dispatcherUrl` | `http://localhost:3030` | Dispatcher base URL |
 | `pairingToken` | none | Shared Bearer token for dispatcher `/v1/*` calls |
 | `repositories` | `[]` | Repository bindings this daemon is allowed to claim |
-| `slackChannels` | none | Slack channel to repository mappings |
+| `slackChannels` | none | Slack compatibility bindings that map `teamId/channelId` into the generic channel binding table |
 | `claudeCode` | none | Claude Code executor settings |
 | `security` | none | Runner security policy |
 | `githubToken` | none | Optional token for PR creation from daemon-produced branches |
@@ -142,6 +143,7 @@ for repeatable setups.
 | `OPENTAG_KEEP_WORKTREE` | `on_failure` | `always`, `on_failure`, or `never` |
 | `OPENTAG_SLACK_TEAM_ID` | none | Creates one env-derived Slack channel binding when paired with repo env |
 | `OPENTAG_SLACK_CHANNEL_ID` | none | Creates one env-derived Slack channel binding when paired with repo env |
+| `OPENTAG_SLACK_REPO_PROVIDER` | `github` | Repo provider used for the env-derived Slack channel binding |
 | `OPENTAG_CLAUDE_COMMAND` | `claude` in executor default | Claude Code CLI command |
 | `OPENTAG_CLAUDE_MODEL` | none | Optional Claude model |
 | `OPENTAG_CLAUDE_PERMISSION_MODE` | none | `acceptEdits`, `auto`, `bypassPermissions`, `default`, or `plan` |

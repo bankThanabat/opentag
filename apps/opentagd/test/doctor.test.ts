@@ -41,7 +41,7 @@ describe("opentagd doctor", () => {
             keepWorktree: "on_failure"
           }
         ],
-        slackChannels: [{ teamId: "T123", channelId: "C123", owner: "acme", repo: "demo" }],
+        slackChannels: [{ teamId: "T123", channelId: "C123", repoProvider: "gitlab", owner: "acme", repo: "demo" }],
         githubToken: "ghs_test",
         pollIntervalMs: 5000,
         heartbeatIntervalMs: 15000
@@ -70,11 +70,13 @@ describe("opentagd doctor", () => {
             }
           });
         }
-        if (stringUrl.endsWith("/v1/slack-channel-bindings/T123/C123")) {
+        if (stringUrl.endsWith("/v1/channel-bindings/slack/T123/C123")) {
           return Response.json({
             binding: {
-              teamId: "T123",
-              channelId: "C123",
+              provider: "slack",
+              accountId: "T123",
+              conversationId: "C123",
+              repoProvider: "gitlab",
               owner: "acme",
               repo: "demo"
             }
