@@ -1,3 +1,4 @@
+import { createLarkReplyClient, type LarkReplyClient, parseLarkThreadKey, replyLarkMessage } from "@opentag/lark";
 import { createSlackPostMessagePayload, createSlackUpdateMessagePayload, parseSlackThreadKey } from "@opentag/slack";
 import { createTelegramSendMessageDraftPayload, createTelegramSendMessagePayload, parseTelegramThreadKey } from "@opentag/telegram";
 import type { CallbackMessage, CallbackSink } from "./server.js";
@@ -141,6 +142,39 @@ export function createSlackCallbackSink(input: {
           }
         }
       }
+    }
+  };
+}
+
+export function createLarkCallbackSink(input: {
+  appId?: string;
+  appSecret?: string;
+  domain?: "lark" | "feishu";
+  client?: LarkReplyClient;
+}): CallbackSink {
+  // Reject partial credentials so a misconfigured sink fails at startup, not silently.
+  if (!input.client && Boolean(input.appId) !== Boolean(input.appSecret)) {
+    throw new Error("Lark callback sink requires both appId and appSecret (or neither).");
+  }
+
+  const client: LarkReplyClient | undefined =
+    input.client ??
+    (input.appId && input.appSecret
+      ? createLarkReplyClient({ appId: input.appId, appSecret: input.appSecret, ...(input.domain ? { domain: input.domain } : {}) })
+      : undefined);
+
+  return {
+    async deliver(message: CallbackMessage): Promise<void> {
+      if (message.provider !== "lark") return;
+      // A lark run was accepted, so a missing client/threadKey is a real failure, not a silent success.
+      if (!client) {
+        throw new Error("Lark callback sink received a lark message but has no client configured (missing appId/appSecret).");
+      }
+      if (!message.threadKey) {
+        throw new Error("Lark callback message is missing threadKey.");
+      }
+      const { messageId } = parseLarkThreadKey(message.threadKey);
+      await replyLarkMessage(client, { messageId, text: message.body });
     }
   };
 }

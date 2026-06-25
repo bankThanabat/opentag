@@ -87,6 +87,22 @@ a repository:
 }
 ```
 
+Add Lark channel bindings the same way for a Lark chat or group:
+
+```json
+{
+  "larkChannels": [
+    {
+      "tenantKey": "<tenant_key>",
+      "chatId": "oc_...",
+      "repoProvider": "github",
+      "owner": "acme",
+      "repo": "demo"
+    }
+  ]
+}
+```
+
 Sync these generic bindings with:
 
 ```bash
@@ -128,6 +144,7 @@ Use daemon security settings to keep executor runs constrained:
 | `repositories` | `[]` | Repository bindings this daemon is allowed to claim |
 | `channelBindings` | none | Generic channel bindings such as Telegram `botId/chatId -> repo` |
 | `slackChannels` | none | Slack compatibility bindings that map `teamId/channelId` into the generic channel binding table |
+| `larkChannels` | none | Lark bindings that map `tenantKey/chatId` into the generic channel binding table |
 | `claudeCode` | none | Claude Code executor settings |
 | `security` | none | Runner security policy |
 | `githubToken` | none | Optional token for PR creation from daemon-produced branches |
@@ -170,6 +187,8 @@ for repeatable setups.
 | `OPENTAG_SLACK_TEAM_ID` | none | Creates one env-derived Slack channel binding when paired with repo env |
 | `OPENTAG_SLACK_CHANNEL_ID` | none | Creates one env-derived Slack channel binding when paired with repo env |
 | `OPENTAG_SLACK_REPO_PROVIDER` | `github` | Repo provider used for the env-derived Slack channel binding |
+| `OPENTAG_LARK_TENANT_KEY` | none | Creates one env-derived Lark channel binding when paired with repo env |
+| `OPENTAG_LARK_CHAT_ID` | none | Creates one env-derived Lark channel binding when paired with repo env |
 | `OPENTAG_CLAUDE_COMMAND` | `claude` in executor default | Claude Code CLI command |
 | `OPENTAG_CLAUDE_MODEL` | none | Optional Claude model |
 | `OPENTAG_CLAUDE_PERMISSION_MODE` | none | `acceptEdits`, `auto`, `bypassPermissions`, `default`, or `plan` |
@@ -194,6 +213,9 @@ for repeatable setups.
 | `OPENTAG_GITHUB_TOKEN` | none | Enables GitHub callback posting and GitHub apply helpers |
 | `OPENTAG_SLACK_BOT_TOKEN` | none | Single Slack bot token for callback posting |
 | `OPENTAG_SLACK_BOT_TOKENS_JSON` | none | JSON object mapping `agentId` to Slack bot token |
+| `LARK_APP_ID` | none | Lark app id for the callback sink that posts replies via the Lark API |
+| `LARK_APP_SECRET` | none | Lark app secret for the callback sink |
+| `LARK_DOMAIN` | `lark` | `lark` or `feishu`; selects the Lark vs Feishu API host |
 | `OPENTAG_TELEGRAM_BOT_TOKEN` | none | Single Telegram bot token for callback posting |
 | `OPENTAG_TELEGRAM_BOT_TOKENS_JSON` | none | JSON object mapping `agentId` to Telegram bot token |
 
@@ -251,6 +273,32 @@ on the dispatcher. That avoids duplicate acknowledgement comments.
 Set `OPENTAG_SLACK_BOT_TOKEN` or `OPENTAG_SLACK_BOT_TOKENS_JSON` on the
 dispatcher, not on the Slack ingress, when you want final replies posted back to
 Slack threads.
+
+## Lark Ingress Environment
+
+`apps/lark-events` opens a Lark/Feishu WebSocket long connection (no public
+tunnel) and creates OpenTag runs from `im.message.receive_v1` events.
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `LARK_APP_ID` | yes | Lark app id used for the long connection |
+| `LARK_APP_SECRET` | yes | Lark app secret used for the long connection |
+| `LARK_DOMAIN` | no | `lark` or `feishu`; defaults to `lark` |
+| `OPENTAG_DISPATCHER_URL` | yes | Dispatcher URL |
+| `OPENTAG_DISPATCHER_TOKEN` | when dispatcher is paired | Bearer token for dispatcher `/v1/*` |
+| `LARK_BOT_OPEN_ID` | for group chats | Bot open id; group messages must @-mention it. Direct p2p chats do not need it |
+| `OPENTAG_LARK_AGENT_ID` | no | Agent id for the ingress. Defaults to `opentag` |
+
+Set `LARK_APP_ID` / `LARK_APP_SECRET` / `LARK_DOMAIN` on the dispatcher too, so
+the Lark callback sink can post replies. Bind a chat to a repo with
+`opentagd bind-lark-channels` (using `larkChannels`) or `POST /v1/channel-bindings`.
+
+Each chat is bound independently (one `tenantKey/chatId` → one repo), so one bot
+can serve several chats that each target a different repo. Users can also bind a
+chat from inside Lark without the CLI: @-mention the bot with `/bind <owner>/<repo>`
+(e.g. `/bind amplifthq/opentag`, or `/bind github:amplifthq/opentag`). The bot
+confirms in-thread, and an @-mention in an unbound chat replies with the same
+hint. The target repo must already be registered on a runner (`opentagd bind-repos`).
 
 ## Telegram Ingress Environment
 
