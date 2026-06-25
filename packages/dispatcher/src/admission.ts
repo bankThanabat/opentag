@@ -101,6 +101,22 @@ export function createAdmissionRuntime(input: {
 
   return {
     async admitRun(request: AdmitRunInput): Promise<AdmitRunResult> {
+      const existingRun = await input.repo.getRunByEventId({ eventId: request.event.id });
+      if (existingRun) {
+        return {
+          outcome: "drop_duplicate",
+          decision: admissionDecision({
+            action: "drop_duplicate",
+            reason: "Source event already created a run.",
+            reasonCode: "duplicate_source_event",
+            event: request.event,
+            activeRunId: existingRun.run.id
+          }),
+          run: existingRun.run,
+          idempotentReplay: true
+        };
+      }
+
       const repoKey = repoKeyFromEvent(request.event);
       if (!repoKey) {
         return {
@@ -152,22 +168,6 @@ export function createAdmissionRuntime(input: {
         };
       }
 
-      const existingRun = await input.repo.getRunByEventId({ eventId: request.event.id });
-      if (existingRun) {
-        return {
-          outcome: "drop_duplicate",
-          decision: admissionDecision({
-            action: "drop_duplicate",
-            reason: "Source event already created a run.",
-            reasonCode: "duplicate_source_event",
-            event: request.event,
-            activeRunId: existingRun.run.id
-          }),
-          run: existingRun.run,
-          idempotentReplay: true
-        };
-      }
-
       const activeRun = await input.repo.findActiveRunForConversation({
         conversationKey: conversationKeyFromEvent(request.event)
       });
@@ -179,20 +179,22 @@ export function createAdmissionRuntime(input: {
           event: request.event,
           activeRunId: activeRun.run.id
         });
-        const { followUpRequest } = await input.repo.createFollowUpRequest({
+        const { followUpRequest, created } = await input.repo.createFollowUpRequest({
           id: request.requestId,
           event: request.event,
           decision,
           activeRunId: activeRun.run.id
         });
-        await input.repo.appendRunEvent({
-          runId: activeRun.run.id,
-          type: "follow_up_request.queued",
-          payload: { followUpRequestId: followUpRequest.id, sourceEventId: request.event.id },
-          visibility: "audit",
-          importance: "normal",
-          message: decision.reason
-        });
+        if (created) {
+          await input.repo.appendRunEvent({
+            runId: activeRun.run.id,
+            type: "follow_up_request.queued",
+            payload: { followUpRequestId: followUpRequest.id, sourceEventId: request.event.id },
+            visibility: "audit",
+            importance: "normal",
+            message: decision.reason
+          });
+        }
         return {
           outcome: "follow_up_queued",
           decision,

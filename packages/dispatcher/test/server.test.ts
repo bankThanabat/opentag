@@ -420,6 +420,63 @@ describe("dispatcher API", () => {
     expect(events.map((event: { type: string }) => event.type)).toContain("run.create_idempotent_replay");
   });
 
+  it("returns 404 when promoting a missing follow-up request", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+
+    const response = await app.request("/v1/follow-up-requests/missing/create-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_missing_follow_up" })
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "follow_up_request_not_found" });
+  });
+
+  it("returns 409 when promoting a follow-up request that is no longer queued", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        workspacePath: "/Users/test/demo",
+        defaultExecutor: "echo"
+      })
+    });
+
+    await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_active_for_promote", event: { ...validEvent, id: "evt_active_for_promote", sourceEventId: "comment_active_for_promote" } })
+    });
+    await app.request("/v1/runners/runner_1/claim", { method: "POST" });
+    await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "follow_up_for_promote", event: { ...validEvent, id: "evt_follow_up_for_promote", sourceEventId: "comment_follow_up_for_promote" } })
+    });
+
+    const first = await app.request("/v1/follow-up-requests/follow_up_for_promote/create-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_promoted_once" })
+    });
+    expect(first.status).toBe(201);
+
+    const second = await app.request("/v1/follow-up-requests/follow_up_for_promote/create-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_promoted_twice" })
+    });
+    expect(second.status).toBe(409);
+    await expect(second.json()).resolves.toEqual({ error: "follow_up_request_not_queued" });
+  });
+
   it("renders Slack callbacks with Slack mrkdwn and keeps progress audit-only", async () => {
     const delivered: { kind: string; body: string; blocks?: unknown[] }[] = [];
     const app = createDispatcherApp({
@@ -1292,6 +1349,42 @@ describe("dispatcher API", () => {
     const eventsResponse = await app.request("/v1/runs/run_heartbeat/events");
     const { events } = await eventsResponse.json();
     expect(events.map((event: { type: string }) => event.type)).toContain("run.heartbeat");
+  });
+
+  it("returns needs_human_decision when the agent access profile hook denies the run", async () => {
+    const app = createDispatcherApp({
+      databasePath: ":memory:",
+      agentAccessProfileCheck: async () => ({
+        allowed: false,
+        reason: "access denied",
+        reasonCode: "agent_access_profile_denied"
+      })
+    });
+
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1"
+      })
+    });
+
+    const response = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_access_denied", event: validEvent })
+    });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      decision: {
+        action: "needs_human_decision",
+        reasonCode: "agent_access_profile_denied"
+      }
+    });
   });
 
   it("stores and returns generic channel bindings", async () => {

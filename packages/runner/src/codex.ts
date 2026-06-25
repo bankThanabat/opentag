@@ -1,4 +1,4 @@
-import type { ContextPointer } from "@opentag/core";
+import type { ContextPacket, ContextPointer } from "@opentag/core";
 import { assertCommandSucceeded, nodeCommandRunner, type CommandRunner } from "./command.js";
 import { renderContextPacketForPrompt, type ExecutorAdapter } from "./executor.js";
 import {
@@ -28,7 +28,7 @@ function buildPrompt(input: {
   runId: string;
   rawText: string;
   context: ContextPointer[];
-  contextPacket: import("@opentag/core").ContextPacket | undefined;
+  contextPacket: ContextPacket | undefined;
 }): string {
   return [
     "You are executing an OpenTag run in a local checkout.",

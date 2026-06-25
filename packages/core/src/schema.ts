@@ -285,7 +285,7 @@ export const RunAdmissionDecisionSchema = z.object({
   eventId: z.string().min(1).optional()
 });
 
-export const FollowUpRequestStatusSchema = z.enum(["queued", "promoted", "cancelled"]);
+export const FollowUpRequestStatusSchema = z.enum(["queued", "promoting", "promoted", "cancelled"]);
 
 export const FollowUpRequestSchema = z.object({
   id: z.string().min(1),

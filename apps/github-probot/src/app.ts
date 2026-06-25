@@ -88,7 +88,7 @@ async function createDispatcherRun(input: { event: OpenTagEvent; log: { warn(dat
   const runId = `run_${Date.now()}`;
   if (!dispatcherUrl) {
     input.log.warn({ runId, event: input.event }, "OPENTAG_DISPATCHER_URL is not set; run was not dispatched");
-    return { runId };
+    return {};
   }
 
   const client = createOpenTagClient({

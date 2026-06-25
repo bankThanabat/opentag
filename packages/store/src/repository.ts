@@ -580,36 +580,60 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       if (row.status !== "queued") {
         throw new Error(`Follow-up request ${input.followUpRequestId} is not queued.`);
       }
-      const followUp = followUpRequestFromRow(row);
-      const { run } = await this.createRun({
-        id: input.runId,
-        event: followUp.event,
-        ...(followUp.activeRunId ? { parentRunId: followUp.activeRunId } : {})
-      });
       const updatedAt = nowIso();
-      await db
+      const promoteResult = await db
         .update(followUpRequests)
         .set({
-          status: "promoted",
-          createdRunId: run.id,
+          status: "promoting",
           updatedAt
         })
-        .where(eq(followUpRequests.id, input.followUpRequestId));
-      const updated = await db.select().from(followUpRequests).where(eq(followUpRequests.id, input.followUpRequestId)).limit(1).get();
-      if (!updated) {
-        throw new Error(`Follow-up request ${input.followUpRequestId} was promoted but could not be loaded`);
+        .where(and(eq(followUpRequests.id, input.followUpRequestId), eq(followUpRequests.status, "queued")));
+      if (promoteResult.changes === 0) {
+        throw new Error(`Follow-up request ${input.followUpRequestId} is not queued.`);
       }
-      if (followUp.activeRunId) {
-        await appendRunEvent({
-          runId: followUp.activeRunId,
-          type: "follow_up_request.promoted",
-          payload: { followUpRequestId: followUp.id, createdRunId: run.id, sourceEventId: followUp.sourceEventId },
-          visibility: "audit",
-          importance: "normal",
-          createdAt: updatedAt
+      const followUp = followUpRequestFromRow({ ...row, status: "promoting", updatedAt });
+      try {
+        const { run, created } = await this.createRun({
+          id: input.runId,
+          event: followUp.event,
+          ...(followUp.activeRunId ? { parentRunId: followUp.activeRunId } : {})
         });
+        if (!created) {
+          throw new Error(`Run already exists for follow-up request ${input.followUpRequestId}.`);
+        }
+        await db
+          .update(followUpRequests)
+          .set({
+            status: "promoted",
+            createdRunId: run.id,
+            updatedAt
+          })
+          .where(eq(followUpRequests.id, input.followUpRequestId));
+        const updated = await db.select().from(followUpRequests).where(eq(followUpRequests.id, input.followUpRequestId)).limit(1).get();
+        if (!updated) {
+          throw new Error(`Follow-up request ${input.followUpRequestId} was promoted but could not be loaded`);
+        }
+        if (followUp.activeRunId) {
+          await appendRunEvent({
+            runId: followUp.activeRunId,
+            type: "follow_up_request.promoted",
+            payload: { followUpRequestId: followUp.id, createdRunId: run.id, sourceEventId: followUp.sourceEventId },
+            visibility: "audit",
+            importance: "normal",
+            createdAt: updatedAt
+          });
+        }
+        return { followUpRequest: followUpRequestFromRow(updated), run };
+      } catch (error) {
+        await db
+          .update(followUpRequests)
+          .set({
+            status: "queued",
+            updatedAt: nowIso()
+          })
+          .where(and(eq(followUpRequests.id, input.followUpRequestId), eq(followUpRequests.status, "promoting")));
+        throw error;
       }
-      return { followUpRequest: followUpRequestFromRow(updated), run };
     },
 
     async registerRunner(input: { runnerId: string; name: string }): Promise<void> {

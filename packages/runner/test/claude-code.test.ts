@@ -60,6 +60,19 @@ describe("Claude Code executor", () => {
         contextPacket: {
           summary: "Use the linked issue and propose the narrowest fix.",
           sourcePointers: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" }],
+          intent: {
+            rawText: "fix this",
+            normalizedIntent: "fix",
+            requestedBy: { provider: "github", providerUserId: "42", handle: "octocat" }
+          },
+          sources: [
+            {
+              pointer: { kind: "github.issue", uri: "https://github.com/acme/demo/issues/1", visibility: "public" },
+              role: "primary",
+              included: true,
+              reason: "The issue is the main source for the request."
+            }
+          ],
           facts: [{ text: "The failing test is flaky in CI." }],
           exclusions: ["Do not modify unrelated callback code."]
         },
@@ -85,6 +98,8 @@ describe("Claude Code executor", () => {
     expect(claudePrintCall?.args).toContain("sonnet");
     expect(claudePrintCall?.input).toContain("OpenTag context packet:");
     expect(claudePrintCall?.input).toContain("Use the linked issue and propose the narrowest fix.");
+    expect(claudePrintCall?.input).toContain("intent: fix");
+    expect(claudePrintCall?.input).toContain("[primary] github.issue: https://github.com/acme/demo/issues/1");
     expect(claudePrintCall?.input).toContain("Do not modify unrelated callback code.");
     expect(claudePrintCall?.input).toContain("fix this");
     expect(events).toEqual(["executor.started", "executor.progress", "executor.progress", "executor.completed"]);

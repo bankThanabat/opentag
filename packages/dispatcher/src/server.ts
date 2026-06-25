@@ -475,7 +475,24 @@ export function createDispatcherApp(input: {
       return c.json({ decision: admitted.decision, followUpRequest: admitted.followUpRequest }, 202);
     }
 
-    const { run } = await repo.createRun({ id: parsed.runId, event: parsed.event });
+    const createdRun = await repo.createRun({ id: parsed.runId, event: parsed.event });
+    if (!createdRun.created) {
+      return c.json(
+        {
+          decision: {
+            ...admitted.decision,
+            action: "drop_duplicate",
+            reason: "Source event already created a run.",
+            reasonCode: "duplicate_source_event",
+            activeRunId: createdRun.run.id
+          },
+          run: createdRun.run,
+          idempotentReplay: true
+        },
+        200
+      );
+    }
+    const { run } = createdRun;
     await deliverAndAudit({
       repo,
       sink: callbackSink,
@@ -501,10 +518,22 @@ export function createDispatcherApp(input: {
 
   app.post("/v1/follow-up-requests/:id/create-run", async (c) => {
     const parsed = PromoteFollowUpRequestSchema.parse(await c.req.json());
-    const promoted = await repo.createRunFromFollowUpRequest({
-      followUpRequestId: c.req.param("id"),
-      runId: parsed.runId
-    });
+    let promoted;
+    try {
+      promoted = await repo.createRunFromFollowUpRequest({
+        followUpRequestId: c.req.param("id"),
+        runId: parsed.runId
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.startsWith("Follow-up request not found:")) {
+        return c.json({ error: "follow_up_request_not_found" }, 404);
+      }
+      if (message.includes("is not queued")) {
+        return c.json({ error: "follow_up_request_not_queued" }, 409);
+      }
+      throw error;
+    }
     const followUpRequest = promoted.followUpRequest;
     const event = followUpRequest.event;
     await deliverAndAudit({
