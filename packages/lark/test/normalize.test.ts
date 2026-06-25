@@ -16,21 +16,24 @@ const baseInput: LarkMessageInput = {
   messageId: "om_msg",
   eventId: "evt_1",
   eventTimeMs: 1_700_000_000_000,
-  botMentionKey: "@_user_1",
   binding: { tenantKey: "tk_123", chatId: "oc_chat", owner: "acme", repo: "app" }
 };
 
 describe("stripLarkMention", () => {
-  it("strips the bot mention placeholder and trims", () => {
-    expect(stripLarkMention("@_user_1 hello", "@_user_1")).toBe("hello");
+  it("strips a mention placeholder and trims", () => {
+    expect(stripLarkMention("@_user_1 hello")).toBe("hello");
   });
 
-  it("strips leftover @_user_N tokens and collapses whitespace", () => {
-    expect(stripLarkMention("hey @_user_2   there")).toBe("hey there");
+  it("removes @_user_10 intact (no leftover digit from an @_user_1 prefix strip)", () => {
+    expect(stripLarkMention("@_user_10 deploy now")).toBe("deploy now");
+  });
+
+  it("strips multiple placeholders and collapses whitespace", () => {
+    expect(stripLarkMention("@_user_1 hey @_user_2   there")).toBe("hey there");
   });
 
   it("returns empty string when only a mention is present", () => {
-    expect(stripLarkMention("@_user_1", "@_user_1")).toBe("");
+    expect(stripLarkMention("@_user_1")).toBe("");
   });
 });
 

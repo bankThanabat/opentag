@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as lark from "@larksuiteoapi/node-sdk";
 import { createOpenTagClient } from "@opentag/client";
 import { createLarkMessageHandler, type LarkInboundMessageEvent } from "./app.js";
@@ -38,13 +39,18 @@ const handler = createLarkMessageHandler({
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes("channel_binding_not_found")) {
+        console.log(
+          `[lark] message from an unbound chat — to route it to a repo, bind:\n` +
+            `      provider=lark  accountId(tenant_key)=${input.tenantKey}  conversationId(chat_id)=${input.chatId}\n` +
+            `      via "opentagd bind-lark-channels" (after setting larkChannels) or POST /v1/channel-bindings`
+        );
         return null;
       }
       throw error;
     }
   },
   async createRun(event) {
-    const runId = `run_${Date.now()}`;
+    const runId = `run_${randomUUID()}`;
     await dispatcherClient.createRun({ runId, event });
     return { runId };
   }
@@ -57,6 +63,9 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
 });
 
 const wsClient = new lark.WSClient({ appId, appSecret, domain });
-void wsClient.start({ eventDispatcher });
+wsClient.start({ eventDispatcher }).catch((error: unknown) => {
+  console.error("[lark] failed to start long-connection client:", error);
+  process.exit(1);
+});
 
 console.log("OpenTag Lark events long-connection ingress started");

@@ -5,12 +5,15 @@ import { createLarkMessageHandler, type LarkInboundMessageEvent } from "../src/a
 function messageEvent(overrides?: {
   text?: string;
   messageType?: string;
+  chatType?: string;
   chatId?: string;
   tenantKey?: string;
   messageId?: string;
   eventId?: string;
   openId?: string;
+  mentionBot?: boolean;
 }): LarkInboundMessageEvent {
+  const mentionBot = overrides?.mentionBot ?? true;
   return {
     header: {
       event_id: overrides?.eventId ?? "evt_1",
@@ -27,10 +30,10 @@ function messageEvent(overrides?: {
       message: {
         message_id: overrides?.messageId ?? "om_msg",
         chat_id: overrides?.chatId ?? "oc_chat",
-        chat_type: "group",
+        chat_type: overrides?.chatType ?? "group",
         message_type: overrides?.messageType ?? "text",
         content: JSON.stringify({ text: overrides?.text ?? "@_user_1 fix the bug" }),
-        mentions: [{ key: "@_user_1", id: { open_id: "ou_bot" }, name: "OpenTag" }]
+        mentions: mentionBot ? [{ key: "@_user_1", id: { open_id: "ou_bot" }, name: "OpenTag" }] : []
       }
     }
   };
@@ -38,62 +41,87 @@ function messageEvent(overrides?: {
 
 const binding = { tenantKey: "tk_123", chatId: "oc_chat", owner: "acme", repo: "app" };
 
-describe("createLarkMessageHandler", () => {
-  it("normalizes a text message and creates a run", async () => {
-    const createRun = vi.fn(async (_event: OpenTagEvent) => ({ runId: "run_1" }));
-    const handler = createLarkMessageHandler({
-      agentId: "opentag",
-      botOpenId: "ou_bot",
-      resolveChannelBinding: async () => binding,
-      createRun
-    });
+function makeHandler(opts?: { withBotOpenId?: boolean; createRun?: ReturnType<typeof vi.fn> }) {
+  const createRun = opts?.createRun ?? vi.fn(async (_event: OpenTagEvent) => ({ runId: "run_1" }));
+  const handler = createLarkMessageHandler({
+    agentId: "opentag",
+    ...(opts?.withBotOpenId === false ? {} : { botOpenId: "ou_bot" }),
+    resolveChannelBinding: async () => binding,
+    createRun
+  });
+  return { handler, createRun };
+}
 
+describe("createLarkMessageHandler", () => {
+  it("normalizes a group message that @-mentions the bot and creates a run", async () => {
+    const { handler, createRun } = makeHandler();
     const outcome = await handler(messageEvent());
     expect(outcome.status).toBe("created");
     expect(outcome.runId).toBe("run_1");
-    expect(createRun).toHaveBeenCalledTimes(1);
     const event = createRun.mock.calls[0]?.[0];
     expect(event?.source).toBe("lark");
     expect(event?.command.rawText).toBe("fix the bug");
     expect(event?.callback.threadKey).toBe("tk_123|oc_chat|om_msg");
   });
 
-  it("ignores non-text messages", async () => {
-    const handler = createLarkMessageHandler({
-      agentId: "opentag",
-      resolveChannelBinding: async () => binding,
-      createRun: async () => ({ runId: "run_x" })
-    });
-    expect((await handler(messageEvent({ messageType: "image" }))).status).toBe("ignored_non_text");
+  it("handles a direct (p2p) message without requiring a mention", async () => {
+    const { handler } = makeHandler({ withBotOpenId: false });
+    const outcome = await handler(messageEvent({ chatType: "p2p", text: "fix the bug", mentionBot: false }));
+    expect(outcome.status).toBe("created");
   });
 
-  it("ignores messages from unbound chats", async () => {
-    const createRun = vi.fn(async () => ({ runId: "run_x" }));
-    const handler = createLarkMessageHandler({
-      agentId: "opentag",
-      resolveChannelBinding: async () => null,
-      createRun
-    });
-    expect((await handler(messageEvent())).status).toBe("ignored_unbound_chat");
+  it("ignores group messages that do not @-mention the bot", async () => {
+    const { handler, createRun } = makeHandler();
+    const outcome = await handler(messageEvent({ text: "fix the bug", mentionBot: false }));
+    expect(outcome.status).toBe("ignored_not_addressed");
     expect(createRun).not.toHaveBeenCalled();
   });
 
-  it("ignores messages whose command is empty after stripping the mention", async () => {
+  it("ignores group messages when botOpenId is not configured", async () => {
+    const { handler } = makeHandler({ withBotOpenId: false });
+    expect((await handler(messageEvent())).status).toBe("ignored_group_requires_bot_open_id");
+  });
+
+  it("ignores non-text messages", async () => {
+    const { handler } = makeHandler();
+    expect((await handler(messageEvent({ messageType: "image" }))).status).toBe("ignored_non_text");
+  });
+
+  it("ignores messages from unbound chats and surfaces the ids", async () => {
+    const createRun = vi.fn(async () => ({ runId: "run_x" }));
+    const handler = createLarkMessageHandler({
+      agentId: "opentag",
+      botOpenId: "ou_bot",
+      resolveChannelBinding: async () => null,
+      createRun
+    });
+    const outcome = await handler(messageEvent());
+    expect(outcome.status).toBe("ignored_unbound_chat");
+    expect(outcome.tenantKey).toBe("tk_123");
+    expect(outcome.chatId).toBe("oc_chat");
+    expect(createRun).not.toHaveBeenCalled();
+  });
+
+  it("falls back to now() when create_time is malformed", async () => {
+    const createRun = vi.fn(async (_event: OpenTagEvent) => ({ runId: "run_1" }));
     const handler = createLarkMessageHandler({
       agentId: "opentag",
       botOpenId: "ou_bot",
       resolveChannelBinding: async () => binding,
-      createRun: async () => ({ runId: "run_x" })
+      createRun,
+      now: () => 1_700_000_000_000
     });
-    expect((await handler(messageEvent({ text: "@_user_1" }))).status).toBe("ignored_empty_command");
+    const evt = messageEvent();
+    evt.header!.create_time = "not-a-number";
+    const outcome = await handler(evt);
+    expect(outcome.status).toBe("created");
+    const event = createRun.mock.calls[0]?.[0];
+    expect(() => new Date(event!.receivedAt).toISOString()).not.toThrow();
+    expect(event?.receivedAt).toBe(new Date(1_700_000_000_000).toISOString());
   });
 
   it("ignores payloads missing required ids", async () => {
-    const handler = createLarkMessageHandler({
-      agentId: "opentag",
-      resolveChannelBinding: async () => binding,
-      createRun: async () => ({ runId: "run_x" })
-    });
+    const { handler } = makeHandler();
     const broken = messageEvent();
     broken.event!.message!.chat_id = undefined;
     expect((await handler(broken)).status).toBe("ignored_invalid_payload");

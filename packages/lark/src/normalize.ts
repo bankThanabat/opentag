@@ -20,23 +20,20 @@ export type LarkMessageInput = {
   eventTimeMs: number;
   agentId?: string;
   botOpenId?: string;
-  botMentionKey?: string;
   callbackUri?: string;
   binding: LarkChannelBinding;
 };
 
 /**
  * Lark message text encodes @-mentions as `@_user_N` placeholders, with the
- * mentions[] array mapping each placeholder key to a user. Strip the bot's
- * placeholder (when known) plus any leftover `@_user_N` tokens, then collapse
- * whitespace. Returns the bare command text.
+ * mentions[] array mapping each placeholder key to a user. Strip every
+ * placeholder token and collapse whitespace, returning the bare command text.
+ *
+ * The `\d+` match removes a whole index (so `@_user_10` is removed intact rather
+ * than leaving a stray `0` from a `@_user_1` substring strip).
  */
-export function stripLarkMention(text: string, botMentionKey?: string): string {
-  let stripped = text;
-  if (botMentionKey) {
-    stripped = stripped.split(botMentionKey).join(" ");
-  }
-  return stripped
+export function stripLarkMention(text: string): string {
+  return text
     .replace(/@_user_\d+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -131,7 +128,7 @@ function commandMetadata(command: OpenTagCommand): Record<string, unknown> {
 }
 
 export function normalizeLarkMessage(input: LarkMessageInput): OpenTagEvent | null {
-  const rawText = stripLarkMention(input.text, input.botMentionKey);
+  const rawText = stripLarkMention(input.text);
   if (!rawText) return null;
 
   const command = commandFromRawText(rawText);

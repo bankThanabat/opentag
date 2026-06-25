@@ -173,6 +173,32 @@ program
   });
 
 program
+  .command("bind-lark-channels")
+  .description("Sync configured Lark channel bindings to the dispatcher")
+  .action(async () => {
+    const config = loadConfigOrExit();
+    const client = createDispatcherAdminClient({
+      dispatcherUrl: config.dispatcherUrl,
+      runnerId: config.runnerId,
+      ...(config.pairingToken ? { pairingToken: config.pairingToken } : {})
+    });
+    for (const binding of config.larkChannels ?? []) {
+      await client.bindChannel({
+        provider: "lark",
+        accountId: binding.tenantKey,
+        conversationId: binding.chatId,
+        repoProvider: binding.repoProvider,
+        owner: binding.owner,
+        repo: binding.repo
+      });
+      console.log(`Bound Lark ${binding.tenantKey}/${binding.chatId} to ${binding.owner}/${binding.repo}`);
+    }
+    if (!(config.larkChannels?.length ?? 0)) {
+      console.log("No Lark channels configured.");
+    }
+  });
+
+program
   .command("doctor")
   .description("Check dispatcher, bindings, checkouts, and executors")
   .action(async () => {

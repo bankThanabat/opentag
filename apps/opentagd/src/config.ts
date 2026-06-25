@@ -39,11 +39,20 @@ export const SlackChannelBindingConfigSchema = z.object({
   repo: z.string().min(1)
 });
 
+export const LarkChannelBindingConfigSchema = z.object({
+  tenantKey: z.string().min(1),
+  chatId: z.string().min(1),
+  repoProvider: z.string().min(1).default("github"),
+  owner: z.string().min(1),
+  repo: z.string().min(1)
+});
+
 export const OpenTagDaemonConfigSchema = z.object({
   runnerId: z.string().min(1).default("runner_local"),
   dispatcherUrl: z.string().url().default("http://localhost:3030"),
   repositories: z.array(RepositoryBindingConfigSchema).default([]),
   slackChannels: z.array(SlackChannelBindingConfigSchema).optional(),
+  larkChannels: z.array(LarkChannelBindingConfigSchema).optional(),
   claudeCode: ClaudeCodeExecutorConfigSchema.optional(),
   security: RunnerSecurityPolicySchema.optional(),
   githubToken: z.string().min(1).optional(),
@@ -55,6 +64,7 @@ export const OpenTagDaemonConfigSchema = z.object({
 
 export type RepositoryBindingConfig = z.infer<typeof RepositoryBindingConfigSchema>;
 export type SlackChannelBindingConfig = z.infer<typeof SlackChannelBindingConfigSchema>;
+export type LarkChannelBindingConfig = z.infer<typeof LarkChannelBindingConfigSchema>;
 export type OpenTagDaemonConfig = z.infer<typeof OpenTagDaemonConfigSchema>;
 
 export type InitConfigInput = {
@@ -171,6 +181,19 @@ export function loadConfigFromEnv(): OpenTagDaemonConfig {
             {
               teamId: process.env.OPENTAG_SLACK_TEAM_ID,
               channelId: process.env.OPENTAG_SLACK_CHANNEL_ID,
+              repoProvider: repositoryProvider,
+              owner,
+              repo
+            }
+          ]
+        }
+      : {}),
+    ...(process.env.OPENTAG_LARK_TENANT_KEY && process.env.OPENTAG_LARK_CHAT_ID && owner && repo
+      ? {
+          larkChannels: [
+            {
+              tenantKey: process.env.OPENTAG_LARK_TENANT_KEY,
+              chatId: process.env.OPENTAG_LARK_CHAT_ID,
               repoProvider: repositoryProvider,
               owner,
               repo

@@ -1,13 +1,13 @@
 import type { OpenTagEvent } from "@opentag/core";
 import { type LarkChannelBinding, normalizeLarkMessage } from "@opentag/lark";
 
+export type LarkMention = { key?: string; id?: { open_id?: string }; name?: string };
+
 /**
  * Shape of the `im.message.receive_v1` event payload delivered by
  * @larksuiteoapi/node-sdk's EventDispatcher. Only the fields OpenTag needs are
  * declared; everything is optional because the payload is external input.
  */
-export type LarkMention = { key?: string; id?: { open_id?: string }; name?: string };
-
 export type LarkInboundMessageEvent = {
   header?: {
     event_id?: string;
@@ -49,9 +49,13 @@ export type LarkMessageHandlerOutcome = {
     | "created"
     | "ignored_non_text"
     | "ignored_invalid_payload"
+    | "ignored_group_requires_bot_open_id"
+    | "ignored_not_addressed"
     | "ignored_unbound_chat"
     | "ignored_empty_command";
   runId?: string;
+  tenantKey?: string;
+  chatId?: string;
 };
 
 function extractText(content: string | undefined): string {
@@ -64,20 +68,16 @@ function extractText(content: string | undefined): string {
   }
 }
 
-function findBotMentionKey(mentions: LarkMention[] | undefined, botOpenId: string | undefined): string | undefined {
-  if (!botOpenId || !mentions) return undefined;
-  for (const mention of mentions) {
-    if (mention.id?.open_id === botOpenId && mention.key) {
-      return mention.key;
-    }
-  }
-  return undefined;
+function mentionsBot(mentions: LarkMention[] | undefined, botOpenId: string): boolean {
+  return (mentions ?? []).some((mention) => mention.id?.open_id === botOpenId);
 }
 
 /**
- * Build a handler for inbound Lark message events. The handler resolves the
- * channel binding, normalizes the message into an OpenTagEvent, and creates a
- * run. It is transport-agnostic so it can be unit-tested without a live socket.
+ * Build a handler for inbound Lark message events. The handler enforces that
+ * group messages must @-mention the bot (only direct p2p chats are exempt),
+ * resolves the channel binding, normalizes the message into an OpenTagEvent, and
+ * creates a run. It is transport-agnostic so it can be unit-tested without a
+ * live socket.
  */
 export function createLarkMessageHandler(config: LarkMessageHandlerConfig) {
   return async function handleLarkMessage(data: LarkInboundMessageEvent): Promise<LarkMessageHandlerOutcome> {
@@ -96,13 +96,25 @@ export function createLarkMessageHandler(config: LarkMessageHandlerConfig) {
       return { status: "ignored_invalid_payload" };
     }
 
-    const binding = await config.resolveChannelBinding({ tenantKey, chatId });
-    if (!binding) {
-      return { status: "ignored_unbound_chat" };
+    // Group messages must explicitly @-mention the bot before they can trigger a
+    // (potentially write-capable) run. Direct p2p chats need no mention.
+    const isDirect = message.chat_type === "p2p";
+    if (!isDirect) {
+      if (!config.botOpenId) {
+        return { status: "ignored_group_requires_bot_open_id", tenantKey, chatId };
+      }
+      if (!mentionsBot(message.mentions, config.botOpenId)) {
+        return { status: "ignored_not_addressed", tenantKey, chatId };
+      }
     }
 
-    const botMentionKey = findBotMentionKey(message.mentions, config.botOpenId);
-    const eventTimeMs = header?.create_time ? Number(header.create_time) : (config.now?.() ?? Date.now());
+    const binding = await config.resolveChannelBinding({ tenantKey, chatId });
+    if (!binding) {
+      return { status: "ignored_unbound_chat", tenantKey, chatId };
+    }
+
+    const parsedTime = header?.create_time ? Number(header.create_time) : Number.NaN;
+    const eventTimeMs = Number.isFinite(parsedTime) ? parsedTime : (config.now?.() ?? Date.now());
 
     const event = normalizeLarkMessage({
       tenantKey,
@@ -116,7 +128,6 @@ export function createLarkMessageHandler(config: LarkMessageHandlerConfig) {
       eventTimeMs,
       agentId: config.agentId,
       ...(config.botOpenId ? { botOpenId: config.botOpenId } : {}),
-      ...(botMentionKey ? { botMentionKey } : {}),
       ...(config.callbackUri ? { callbackUri: config.callbackUri } : {}),
       binding
     });
