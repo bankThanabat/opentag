@@ -227,9 +227,6 @@ importers:
 
   packages/dispatcher:
     dependencies:
-      '@larksuiteoapi/node-sdk':
-        specifier: ^1.68.0
-        version: 1.68.0
       '@opentag/core':
         specifier: workspace:*
         version: link:../core
@@ -283,6 +280,9 @@ importers:
 
   packages/lark:
     dependencies:
+      '@larksuiteoapi/node-sdk':
+        specifier: ^1.68.0
+        version: 1.68.0
       '@opentag/core':
         specifier: workspace:*
         version: link:../core

@@ -1,5 +1,4 @@
-import * as lark from "@larksuiteoapi/node-sdk";
-import { createLarkTextMessageContent, parseLarkThreadKey } from "@opentag/lark";
+import { createLarkReplyClient, type LarkReplyClient, parseLarkThreadKey, replyLarkMessage } from "@opentag/lark";
 import { createSlackPostMessagePayload, createSlackUpdateMessagePayload, parseSlackThreadKey } from "@opentag/slack";
 import type { CallbackMessage, CallbackSink } from "./server.js";
 
@@ -146,26 +145,13 @@ export function createSlackCallbackSink(input: {
   };
 }
 
-export type LarkReplyClient = {
-  im: {
-    message: {
-      reply(payload: {
-        path: { message_id: string };
-        data: { content: string; msg_type: string; reply_in_thread?: boolean; uuid?: string };
-      }): Promise<unknown>;
-    };
-  };
-};
-
 export function createLarkCallbackSink(input: {
   appId?: string;
   appSecret?: string;
   domain?: "lark" | "feishu";
   client?: LarkReplyClient;
 }): CallbackSink {
-  // Reject partial credentials up front so a misconfigured sink fails loudly at
-  // startup rather than silently dropping replies. Neither credential set is
-  // fine (Lark is simply not configured); exactly one set is a mistake.
+  // Reject partial credentials so a misconfigured sink fails at startup, not silently.
   if (!input.client && Boolean(input.appId) !== Boolean(input.appSecret)) {
     throw new Error("Lark callback sink requires both appId and appSecret (or neither).");
   }
@@ -173,34 +159,21 @@ export function createLarkCallbackSink(input: {
   const client: LarkReplyClient | undefined =
     input.client ??
     (input.appId && input.appSecret
-      ? new lark.Client({
-          appId: input.appId,
-          appSecret: input.appSecret,
-          domain: input.domain === "feishu" ? lark.Domain.Feishu : lark.Domain.Lark
-        })
+      ? createLarkReplyClient({ appId: input.appId, appSecret: input.appSecret, ...(input.domain ? { domain: input.domain } : {}) })
       : undefined);
 
   return {
     async deliver(message: CallbackMessage): Promise<void> {
       if (message.provider !== "lark") return;
-      // A lark run was accepted, so a missing client or threadKey is a real
-      // delivery failure that must surface — not a silent success.
+      // A lark run was accepted, so a missing client/threadKey is a real failure, not a silent success.
       if (!client) {
         throw new Error("Lark callback sink received a lark message but has no client configured (missing appId/appSecret).");
       }
       if (!message.threadKey) {
         throw new Error("Lark callback message is missing threadKey.");
       }
-
       const { messageId } = parseLarkThreadKey(message.threadKey);
-      await client.im.message.reply({
-        path: { message_id: messageId },
-        data: {
-          content: createLarkTextMessageContent(message.body),
-          msg_type: "text",
-          reply_in_thread: true
-        }
-      });
+      await replyLarkMessage(client, { messageId, text: message.body });
     }
   };
 }

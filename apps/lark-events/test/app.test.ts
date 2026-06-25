@@ -126,4 +126,17 @@ describe("createLarkMessageHandler", () => {
     broken.event!.message!.chat_id = undefined;
     expect((await handler(broken)).status).toBe("ignored_invalid_payload");
   });
+
+  it("propagates createRun failure instead of silently succeeding", async () => {
+    const createRun = vi.fn(async () => {
+      throw new Error("dispatcher unreachable");
+    });
+    const handler = createLarkMessageHandler({
+      agentId: "opentag",
+      botOpenId: "ou_bot",
+      resolveChannelBinding: async () => binding,
+      createRun
+    });
+    await expect(handler(messageEvent())).rejects.toThrow(/dispatcher unreachable/);
+  });
 });

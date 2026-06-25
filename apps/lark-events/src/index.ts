@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as lark from "@larksuiteoapi/node-sdk";
 import { createOpenTagClient } from "@opentag/client";
-import { createLarkMessageHandler, type LarkInboundMessageEvent } from "./app.js";
+import { createLarkMessageHandler, type LarkInboundMessageEvent, type LarkMessageHandlerOutcome } from "./app.js";
 
 const appId = process.env.LARK_APP_ID;
 const appSecret = process.env.LARK_APP_SECRET;
@@ -39,11 +39,6 @@ const handler = createLarkMessageHandler({
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes("channel_binding_not_found")) {
-        console.log(
-          `[lark] message from an unbound chat — to route it to a repo, bind:\n` +
-            `      provider=lark  accountId(tenant_key)=${input.tenantKey}  conversationId(chat_id)=${input.chatId}\n` +
-            `      via "opentagd bind-lark-channels" (after setting larkChannels) or POST /v1/channel-bindings`
-        );
         return null;
       }
       throw error;
@@ -56,9 +51,20 @@ const handler = createLarkMessageHandler({
   }
 });
 
+function logIgnored(outcome: LarkMessageHandlerOutcome): void {
+  if (outcome.status === "created") return;
+  if (outcome.status === "ignored_unbound_chat") {
+    console.log(
+      `[lark] ignored unbound chat — bind it: provider=lark accountId(tenant_key)=${outcome.tenantKey} conversationId(chat_id)=${outcome.chatId} (opentagd bind-lark-channels or POST /v1/channel-bindings)`
+    );
+    return;
+  }
+  console.log(`[lark] ignored event: ${outcome.status}${outcome.chatId ? ` chat_id=${outcome.chatId}` : ""}`);
+}
+
 const eventDispatcher = new lark.EventDispatcher({}).register({
   "im.message.receive_v1": async (data) => {
-    await handler(data as unknown as LarkInboundMessageEvent);
+    logIgnored(await handler(data as unknown as LarkInboundMessageEvent));
   }
 });
 

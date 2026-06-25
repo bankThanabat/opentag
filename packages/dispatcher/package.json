@@ -32,7 +32,6 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@larksuiteoapi/node-sdk": "^1.68.0",
     "@opentag/core": "workspace:*",
     "@opentag/github": "workspace:*",
     "@opentag/lark": "workspace:*",

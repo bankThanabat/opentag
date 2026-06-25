@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createLarkCallbackSink, type LarkReplyClient } from "../src/callbacks.js";
+import type { LarkReplyClient } from "@opentag/lark";
+import { createLarkCallbackSink } from "../src/callbacks.js";
 import type { CallbackMessage } from "../src/server.js";
 
 function larkMessage(overrides?: Partial<CallbackMessage>): CallbackMessage {

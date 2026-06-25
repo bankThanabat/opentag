@@ -28,10 +28,7 @@ export function renderLarkFinalResult(result: OpenTagRunResult): string {
   return lines.join("\n");
 }
 
-/**
- * Lark text messages carry their body as a JSON-encoded `{ "text": "..." }`
- * string in the `content` field. This helper produces that serialized content.
- */
+// Lark text message content is a JSON-encoded `{ "text": "..." }` string.
 export function createLarkTextMessageContent(text: string): string {
   return JSON.stringify({ text });
 }

@@ -24,14 +24,7 @@ export type LarkMessageInput = {
   binding: LarkChannelBinding;
 };
 
-/**
- * Lark message text encodes @-mentions as `@_user_N` placeholders, with the
- * mentions[] array mapping each placeholder key to a user. Strip every
- * placeholder token and collapse whitespace, returning the bare command text.
- *
- * The `\d+` match removes a whole index (so `@_user_10` is removed intact rather
- * than leaving a stray `0` from a `@_user_1` substring strip).
- */
+// Strip `@_user_N` mention placeholders (whole \d+ index) and collapse whitespace.
 export function stripLarkMention(text: string): string {
   return text
     .replace(/@_user_\d+/g, " ")

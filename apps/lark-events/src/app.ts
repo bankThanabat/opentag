@@ -3,11 +3,7 @@ import { type LarkChannelBinding, normalizeLarkMessage } from "@opentag/lark";
 
 export type LarkMention = { key?: string; id?: { open_id?: string }; name?: string };
 
-/**
- * Shape of the `im.message.receive_v1` event payload delivered by
- * @larksuiteoapi/node-sdk's EventDispatcher. Only the fields OpenTag needs are
- * declared; everything is optional because the payload is external input.
- */
+// Subset of the `im.message.receive_v1` payload OpenTag needs; all optional (external input).
 export type LarkInboundMessageEvent = {
   header?: {
     event_id?: string;
@@ -72,13 +68,7 @@ function mentionsBot(mentions: LarkMention[] | undefined, botOpenId: string): bo
   return (mentions ?? []).some((mention) => mention.id?.open_id === botOpenId);
 }
 
-/**
- * Build a handler for inbound Lark message events. The handler enforces that
- * group messages must @-mention the bot (only direct p2p chats are exempt),
- * resolves the channel binding, normalizes the message into an OpenTagEvent, and
- * creates a run. It is transport-agnostic so it can be unit-tested without a
- * live socket.
- */
+// Handle one inbound Lark message: group messages must @-mention the bot, then resolve binding, normalize, create a run.
 export function createLarkMessageHandler(config: LarkMessageHandlerConfig) {
   return async function handleLarkMessage(data: LarkInboundMessageEvent): Promise<LarkMessageHandlerOutcome> {
     const message = data.event?.message;
@@ -96,8 +86,7 @@ export function createLarkMessageHandler(config: LarkMessageHandlerConfig) {
       return { status: "ignored_invalid_payload" };
     }
 
-    // Group messages must explicitly @-mention the bot before they can trigger a
-    // (potentially write-capable) run. Direct p2p chats need no mention.
+    // Group messages must @-mention the bot before triggering a (write-capable) run; p2p is exempt.
     const isDirect = message.chat_type === "p2p";
     if (!isDirect) {
       if (!config.botOpenId) {
