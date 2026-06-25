@@ -14,6 +14,18 @@ function hasPermission(event: OpenTagEvent, scope: string): boolean {
   return event.permissions.some((permission) => permission.scope === scope);
 }
 
+function isGitHubRepositoryTarget(input: { event: OpenTagEvent; binding: RepositoryBindingConfig }): boolean {
+  const repoProvider = input.event.metadata["repoProvider"];
+  return input.binding.provider === "github" && (repoProvider == null || repoProvider === "github");
+}
+
+function repositoryTargetMatchesBinding(input: { event: OpenTagEvent; binding: RepositoryBindingConfig }): boolean {
+  const owner = input.event.metadata["owner"];
+  const repo = input.event.metadata["repo"];
+  if (typeof owner !== "string" || typeof repo !== "string") return false;
+  return owner === input.binding.owner && repo === input.binding.repo;
+}
+
 export async function maybeCreatePullRequest(input: {
   run: OpenTagRun;
   event: OpenTagEvent;
@@ -23,23 +35,24 @@ export async function maybeCreatePullRequest(input: {
 }): Promise<OpenTagRunResult> {
   if (!input.options.githubToken) return input.result;
   if (!input.options.allowAutoCreatePullRequest) return input.result;
-  if (input.event.source !== "github") return input.result;
+  if (!isGitHubRepositoryTarget({ event: input.event, binding: input.binding })) return input.result;
+  if (!repositoryTargetMatchesBinding({ event: input.event, binding: input.binding })) return input.result;
   if (!hasPermission(input.event, "pr:create")) return input.result;
   const changedFiles = input.result.changedFiles ?? [];
   if (changedFiles.length === 0) return input.result;
-
-  const owner = input.event.metadata["owner"];
-  const repo = input.event.metadata["repo"];
-  if (typeof owner !== "string" || typeof repo !== "string") return input.result;
+  const owner = input.binding.owner;
+  const repo = input.binding.repo;
 
   const branchName = branchNameForRun(input.run.id);
   const runner = input.options.commandRunner ?? nodeCommandRunner;
-  await commitChangedFiles({
-    runner,
-    workspacePath: input.binding.checkoutPath,
-    files: changedFiles,
-    message: `OpenTag run ${input.run.id}`
-  });
+  if (input.run.executor !== "codex") {
+    await commitChangedFiles({
+      runner,
+      workspacePath: input.binding.checkoutPath,
+      files: changedFiles,
+      message: `OpenTag run ${input.run.id}`
+    });
+  }
   await pushBranch({
     runner,
     workspacePath: input.binding.checkoutPath,

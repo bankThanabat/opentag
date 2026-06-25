@@ -1,4 +1,4 @@
-import { commandFromRawText, type OpenTagEvent, type PermissionGrant } from "@opentag/core";
+import { commandFromRawText, type ContextPointer, type OpenTagCommand, type OpenTagEvent, type PermissionGrant } from "@opentag/core";
 
 export type SlackChannelBinding = {
   teamId: string;
@@ -50,7 +50,7 @@ export function parseSlackThreadKey(threadKey: string): { teamId: string; channe
   return { teamId, channelId, threadTs };
 }
 
-function permissionsForIntent(intent: ReturnType<typeof commandFromRawText>["intent"]): PermissionGrant[] {
+function permissionsForIntent(intent: OpenTagCommand["intent"]): PermissionGrant[] {
   const permissions: PermissionGrant[] = [
     {
       scope: "chat:postMessage",
@@ -82,6 +82,50 @@ function permissionsForIntent(intent: ReturnType<typeof commandFromRawText>["int
   return permissions;
 }
 
+function contextPointersForCommand(command: OpenTagCommand): ContextPointer[] {
+  const context: ContextPointer[] = [];
+
+  for (const reference of command.parsed?.references ?? []) {
+    if (reference.kind === "url") {
+      context.push({
+        kind: "url",
+        uri: reference.uri,
+        visibility: "organization",
+        title: reference.title ?? "Command URL reference"
+      });
+      continue;
+    }
+
+    if (reference.kind === "file" || reference.kind === "path") {
+      context.push({
+        kind: "file",
+        uri: reference.uri,
+        ...(reference.line ? { line: reference.line } : {}),
+        ...(reference.startLine ? { startLine: reference.startLine } : {}),
+        ...(reference.endLine ? { endLine: reference.endLine } : {}),
+        visibility: "organization",
+        title: referenceTitle(reference)
+      });
+    }
+  }
+
+  return context;
+}
+
+function referenceTitle(reference: NonNullable<OpenTagCommand["parsed"]>["references"][number]): string {
+  return reference.title ?? "Command file reference";
+}
+
+function commandMetadata(command: OpenTagCommand): Record<string, unknown> {
+  if (!command.parsed) return {};
+  return {
+    commandParser: command.parsed.version,
+    commandDiagnostics: command.parsed.diagnostics,
+    ...(command.parsed.approval ? { approval: command.parsed.approval } : {}),
+    ...(command.parsed.network ? { network: command.parsed.network } : {})
+  };
+}
+
 export function normalizeSlackAppMention(input: SlackAppMentionInput): OpenTagEvent | null {
   const rawText = stripSlackAppMention(input.text, input.botUserId);
   if (!rawText) return null;
@@ -103,7 +147,8 @@ export function normalizeSlackAppMention(input: SlackAppMentionInput): OpenTagEv
     },
     target: {
       mention: input.botUserId ? `<@${input.botUserId}>` : "<@app>",
-      agentId
+      agentId,
+      ...(command.parsed?.executorHint ? { executorHint: command.parsed.executorHint } : {})
     },
     command,
     context: [
@@ -118,7 +163,8 @@ export function normalizeSlackAppMention(input: SlackAppMentionInput): OpenTagEv
         uri: input.text,
         visibility: "organization",
         title: "Slack message text"
-      }
+      },
+      ...contextPointersForCommand(command)
     ],
     permissions: permissionsForIntent(command.intent),
     callback: {
@@ -136,6 +182,7 @@ export function normalizeSlackAppMention(input: SlackAppMentionInput): OpenTagEv
       messageTs: input.ts,
       ...(input.appId ? { slackAppId: input.appId } : {}),
       ...(input.botUserId ? { slackBotUserId: input.botUserId } : {}),
+      ...commandMetadata(command),
       repoProvider: "github",
       owner: input.binding.owner,
       repo: input.binding.repo

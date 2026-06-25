@@ -75,7 +75,12 @@ try {
   assert(delivered[0]?.provider === "slack", "acknowledgement should target Slack");
   assert(delivered[0]?.kind === "acknowledgement", "first Slack callback should be acknowledgement");
 
+  const claimed = await client.claim({ runnerId: "runner_slack_smoke" });
+  assert(claimed?.run.id === "run_slack_smoke_1", "runner should claim the Slack smoke run");
+  assert(claimed.event.source === "slack", "claimed event should remain Slack-shaped");
+
   const progressResponse = await client.progress({
+    runnerId: "runner_slack_smoke",
     runId: "run_slack_smoke_1",
     type: "executor.progress",
     message: "working quietly",
@@ -84,11 +89,8 @@ try {
   assert(progressResponse === undefined, "progress call should complete");
   assert(delivered.length === 1, "Slack progress should remain audit-only by default");
 
-  const claimed = await client.claim({ runnerId: "runner_slack_smoke" });
-  assert(claimed?.run.id === "run_slack_smoke_1", "runner should claim the Slack smoke run");
-  assert(claimed.event.source === "slack", "claimed event should remain Slack-shaped");
-
   await client.complete({
+    runnerId: "runner_slack_smoke",
     runId: "run_slack_smoke_1",
     result: {
       conclusion: "needs_human",

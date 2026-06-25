@@ -181,6 +181,108 @@ describe("OpenTag repository", () => {
     });
   });
 
+  it("claims pending callback deliveries only once", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.enqueueCallbackDelivery({
+      runId: "run_delivery",
+      kind: "acknowledgement",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "hello"
+    });
+
+    const first = await repo.claimPendingCallbackDeliveries({ limit: 10 });
+    const second = await repo.claimPendingCallbackDeliveries({ limit: 10 });
+
+    expect(first).toHaveLength(1);
+    expect(first[0]?.status).toBe("delivering");
+    expect(second).toEqual([]);
+  });
+
+  it("reclaims stale delivering rows and respects retry backoff for failed deliveries", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    await repo.enqueueCallbackDelivery({
+      runId: "run_retry",
+      kind: "acknowledgement",
+      provider: "github",
+      uri: "https://api.github.com/repos/acme/demo/issues/1/comments",
+      body: "hello"
+    });
+
+    // Claim the delivery so it moves to "delivering".
+    const t0 = new Date("2026-01-01T00:00:00.000Z");
+    const claimed = await repo.claimPendingCallbackDeliveries({ limit: 10, now: t0 });
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0]?.status).toBe("delivering");
+
+    // Mark it failed with a future nextAttemptAt.
+    const deliveryId = claimed[0]!.id;
+    const retryAt = "2026-01-01T00:01:00.000Z";
+    await repo.markCallbackFailed({ deliveryId, error: "timeout", nextAttemptAt: retryAt });
+
+    // Before retry window: should not be claimed.
+    const beforeRetry = new Date("2026-01-01T00:00:30.000Z");
+    const tooEarly = await repo.claimPendingCallbackDeliveries({ limit: 10, now: beforeRetry });
+    expect(tooEarly).toHaveLength(0);
+
+    // After retry window: should be claimable again.
+    const afterRetry = new Date("2026-01-01T00:02:00.000Z");
+    const reclaimed = await repo.claimPendingCallbackDeliveries({ limit: 10, now: afterRetry });
+    expect(reclaimed).toHaveLength(1);
+    expect(reclaimed[0]?.attempts).toBe(1);
+
+    // A still-fresh delivering row should not be reclaimed.
+    const freshNow = new Date("2026-01-01T00:02:05.000Z");
+    const notStale = await repo.claimPendingCallbackDeliveries({ limit: 10, now: freshNow, staleDeliveryThresholdMs: 60_000 });
+    expect(notStale).toHaveLength(0);
+
+    // Once the stale threshold passes, the delivering row should be reclaimed.
+    const staleNow = new Date("2026-01-01T00:03:10.000Z");
+    const staleReclaimed = await repo.claimPendingCallbackDeliveries({ limit: 10, now: staleNow, staleDeliveryThresholdMs: 60_000 });
+    expect(staleReclaimed).toHaveLength(1);
+    expect(staleReclaimed[0]?.attempts).toBe(1);
+  });
+
+  it("replays createRun idempotently for the same source event", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrateSchema(sqlite);
+    const repo = createOpenTagRepository(db);
+
+    const githubEvent = {
+      id: "evt_duplicate",
+      source: "github" as const,
+      sourceEventId: "comment_duplicate",
+      receivedAt: "2026-06-24T00:00:00.000Z",
+      actor: { provider: "github" as const, providerUserId: "42", handle: "octocat" },
+      target: { mention: "@opentag", agentId: "opentag" },
+      command: { rawText: "fix this", intent: "fix" as const, args: {} },
+      context: [],
+      permissions: [{ scope: "issue:comment" as const, reason: "reply to source thread" }],
+      callback: { provider: "github" as const, uri: "https://api.github.com/repos/acme/demo/issues/1/comments" },
+      metadata: { owner: "acme", repo: "demo" }
+    };
+
+    const first = await repo.createRun({ id: "run_duplicate_1", event: githubEvent });
+    const second = await repo.createRun({ id: "run_duplicate_2", event: githubEvent });
+
+    expect(first.run.id).toBe("run_duplicate_1");
+    expect(first.created).toBe(true);
+    expect(second.run.id).toBe("run_duplicate_1");
+    expect(second.created).toBe(false);
+
+    const events = await repo.listRunEvents({ runId: "run_duplicate_1" });
+    expect(events.map((event) => event.type)).toContain("run.create_idempotent_replay");
+  });
+
   it("records a completed result", async () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);

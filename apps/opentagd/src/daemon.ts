@@ -1,5 +1,11 @@
 import type { OpenTagEvent, OpenTagRun, OpenTagRunResult } from "@opentag/core";
-import type { ExecutorAdapter } from "@opentag/runner";
+import {
+  assessRunnerSecurity,
+  formatSecurityAssessment,
+  type ExecutorAdapter,
+  type RunnerSecurityPolicy,
+  worktreePathForRun
+} from "@opentag/runner";
 import type { RepositoryBindingConfig } from "./config.js";
 import { maybeCreatePullRequest, type PullRequestOptions } from "./pr.js";
 
@@ -38,6 +44,7 @@ export async function runOneDaemonIteration(input: {
   runnerId: string;
   repositories: RepositoryBindingConfig[];
   executors: Record<string, ExecutorAdapter>;
+  security?: RunnerSecurityPolicy;
   pullRequestOptions?: PullRequestOptions;
   heartbeatIntervalMs?: number;
   client: DaemonClient;
@@ -63,12 +70,49 @@ export async function runOneDaemonIteration(input: {
     return true;
   }
 
+  const executionPath =
+    executorId === "codex"
+      ? worktreePathForRun({
+          workspacePath: binding.checkoutPath,
+          runId: claimed.run.id,
+          ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {})
+        })
+      : binding.checkoutPath;
+
+  const securityAssessment = assessRunnerSecurity({
+    executorId,
+    workspacePath: binding.checkoutPath,
+    executionPath,
+    command: claimed.event.command,
+    context: claimed.event.context,
+    permissions: claimed.event.permissions,
+    ...(input.security ? { policy: input.security } : {})
+  });
+  if (securityAssessment.findings.length > 0) {
+    await input.client.progress(claimed.run.id, {
+      type: securityAssessment.allowed ? "security.audit" : "security.blocked",
+      message: formatSecurityAssessment(securityAssessment),
+      at: new Date().toISOString()
+    });
+  }
+  if (!securityAssessment.allowed) {
+    await input.client.complete(claimed.run.id, {
+      conclusion: "needs_human",
+      summary: formatSecurityAssessment(securityAssessment),
+      nextAction: "Review the request and rerun with a narrower prompt or an explicit local policy override if appropriate."
+    });
+    return true;
+  }
+
   const readiness = await executor.canRun({
     runId: claimed.run.id,
     workspacePath: binding.checkoutPath,
     command: claimed.event.command,
     context: claimed.event.context,
-    ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {})
+    permissions: claimed.event.permissions,
+    ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {}),
+    ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {}),
+    ...(binding.keepWorktree !== undefined ? { keepWorktree: binding.keepWorktree } : {})
   });
   if (!readiness.ready) {
     await input.client.complete(claimed.run.id, {
@@ -97,7 +141,10 @@ export async function runOneDaemonIteration(input: {
         workspacePath: binding.checkoutPath,
         command: claimed.event.command,
         context: claimed.event.context,
-        ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {})
+        permissions: claimed.event.permissions,
+        ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {}),
+        ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {}),
+        ...(binding.keepWorktree !== undefined ? { keepWorktree: binding.keepWorktree } : {})
       },
       {
         emit: async (event) => {
@@ -132,6 +179,7 @@ export async function serveDaemon(input: {
   runnerId: string;
   repositories: RepositoryBindingConfig[];
   executors: Record<string, ExecutorAdapter>;
+  security?: RunnerSecurityPolicy;
   pullRequestOptions?: PullRequestOptions;
   heartbeatIntervalMs?: number;
   pollIntervalMs?: number;
@@ -143,6 +191,7 @@ export async function serveDaemon(input: {
       runnerId: input.runnerId,
       repositories: input.repositories,
       executors: input.executors,
+      ...(input.security ? { security: input.security } : {}),
       ...(input.pullRequestOptions ? { pullRequestOptions: input.pullRequestOptions } : {}),
       ...(input.heartbeatIntervalMs ? { heartbeatIntervalMs: input.heartbeatIntervalMs } : {}),
       client: input.client
