@@ -73,6 +73,22 @@ describe("opentagd config", () => {
     });
   });
 
+  it("defaults Slack channel bindings to github repoProvider", () => {
+    const parsed = parseDaemonConfig({
+      dispatcherUrl: "http://localhost:3030",
+      repositories: [],
+      slackChannels: [{ teamId: "T123", channelId: "C123", owner: "acme", repo: "demo" }]
+    });
+
+    expect(parsed.slackChannels?.[0]).toMatchObject({
+      teamId: "T123",
+      channelId: "C123",
+      repoProvider: "github",
+      owner: "acme",
+      repo: "demo"
+    });
+  });
+
   it("formats zod config errors into a readable message", () => {
     const error = (() => {
       try {

@@ -61,6 +61,7 @@ Create a local runner config that binds the repository you want to test:
     {
       "teamId": "T_REAL",
       "channelId": "C_REAL",
+      "repoProvider": "github",
       "owner": "amplifthq",
       "repo": "opentag"
     }

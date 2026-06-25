@@ -48,8 +48,19 @@ export type RepositoryBindingConfig = {
 export type SlackChannelBindingInput = {
   teamId: string;
   channelId: string;
+  repoProvider?: string;
   owner: string;
   repo: string;
+};
+
+export type ChannelBindingInput = {
+  provider: string;
+  accountId: string;
+  conversationId: string;
+  repoProvider: string;
+  owner: string;
+  repo: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type RunnerRegistration = {
@@ -154,6 +165,8 @@ export type OpenTagClient = {
     mapping: AdapterMutationMapping;
   }): Promise<{ mapping: AdapterMutationMapping }>;
   listRepoMutationMappings(input: { provider: string; owner: string; repo: string }): Promise<{ mappings: AdapterMutationMapping[] }>;
+  bindChannel(input: ChannelBindingInput): Promise<void>;
+  getChannelBinding(input: { provider: string; accountId: string; conversationId: string }): Promise<{ binding: ChannelBindingInput }>;
   bindSlackChannel(input: SlackChannelBindingInput): Promise<void>;
   getSlackChannelBinding(input: { teamId: string; channelId: string }): Promise<{ binding: SlackChannelBindingInput }>;
   createRun(input: CreateRunInput): Promise<CreateRunResult>;
@@ -284,6 +297,26 @@ export function createOpenTagClient(options: OpenTagClientOptions): OpenTagClien
       });
       await assertOk(response, "listRepoMutationMappings");
       return (await response.json()) as { mappings: AdapterMutationMapping[] };
+    },
+
+    async bindChannel(input) {
+      const response = await fetchImpl(`${baseUrl}/v1/channel-bindings`, {
+        method: "POST",
+        headers: jsonHeaders(options.pairingToken),
+        body: JSON.stringify(input)
+      });
+      await assertOk(response, "bindChannel");
+    },
+
+    async getChannelBinding(input) {
+      const response = await fetchImpl(
+        `${baseUrl}/v1/channel-bindings/${encodeURIComponent(input.provider)}/${encodeURIComponent(input.accountId)}/${encodeURIComponent(input.conversationId)}`,
+        {
+          headers: authHeaders(options.pairingToken)
+        }
+      );
+      await assertOk(response, "getChannelBinding");
+      return (await response.json()) as { binding: ChannelBindingInput };
     },
 
     async bindSlackChannel(input) {
@@ -533,6 +566,18 @@ export function createDispatcherAdminClient(options: RunnerClientOptions) {
 
     bindSlackChannel(binding: SlackChannelBindingInput): Promise<void> {
       return client.bindSlackChannel(binding);
+    },
+
+    bindChannel(binding: ChannelBindingInput): Promise<void> {
+      return client.bindChannel(binding);
+    },
+
+    getChannelBinding(input: {
+      provider: string;
+      accountId: string;
+      conversationId: string;
+    }): Promise<{ binding: ChannelBindingInput }> {
+      return client.getChannelBinding(input);
     }
   };
 }

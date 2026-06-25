@@ -15,7 +15,7 @@ pnpm add @opentag/slack
 - `normalizeSlackAppMention`: converts a Slack app mention into an `OpenTagEvent`.
 - `slackThreadKey`: encodes team, channel, and thread timestamp for callback routing.
 - `parseSlackThreadKey`: decodes a Slack thread key for `chat.postMessage`.
-- `SlackChannelBinding`: channel-to-repository binding contract.
+- `SlackChannelBinding`: Slack compatibility binding contract that maps into the generic channel binding layer.
 
 ## Example
 
@@ -34,6 +34,7 @@ const event = normalizeSlackAppMention({
   binding: {
     teamId: "T123",
     channelId: "C123",
+    repoProvider: "github",
     owner: "acme",
     repo: "demo"
   }

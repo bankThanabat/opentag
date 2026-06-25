@@ -22,6 +22,7 @@ describe("Slack normalization", () => {
       binding: {
         teamId: "T123",
         channelId: "C123",
+        repoProvider: "gitlab",
         owner: "acme",
         repo: "demo"
       }
@@ -34,6 +35,7 @@ describe("Slack normalization", () => {
       agentId: "gemini"
     });
     expect(event?.metadata).toMatchObject({ teamId: "T123", channelId: "C123", owner: "acme", repo: "demo" });
+    expect(event?.metadata).toMatchObject({ repoProvider: "gitlab" });
     expect(event?.metadata).toMatchObject({ slackAppId: "A123", slackBotUserId: "U_APP" });
     expect(event?.permissions.map((permission) => permission.scope)).toContain("chat:postMessage");
     expect(event?.callback.uri).toBe("http://127.0.0.1:3102/github-comment");

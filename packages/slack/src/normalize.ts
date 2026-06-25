@@ -3,6 +3,7 @@ import { commandFromRawText, type ContextPointer, type OpenTagCommand, type Open
 export type SlackChannelBinding = {
   teamId: string;
   channelId: string;
+  repoProvider?: string;
   owner: string;
   repo: string;
 };
@@ -183,7 +184,7 @@ export function normalizeSlackAppMention(input: SlackAppMentionInput): OpenTagEv
       ...(input.appId ? { slackAppId: input.appId } : {}),
       ...(input.botUserId ? { slackBotUserId: input.botUserId } : {}),
       ...commandMetadata(command),
-      repoProvider: "github",
+      repoProvider: input.binding.repoProvider ?? "github",
       owner: input.binding.owner,
       repo: input.binding.repo
     }

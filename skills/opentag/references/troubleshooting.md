@@ -41,7 +41,7 @@ curl http://localhost:3030/v1/repo-bindings/github/acme/demo
 Slack binding:
 
 ```bash
-curl http://localhost:3030/v1/slack-channel-bindings/T123/C123
+curl http://localhost:3030/v1/channel-bindings/slack/T123/C123
 ```
 
 Run state and events:
@@ -57,7 +57,8 @@ curl http://localhost:3030/v1/runs/run_demo_1/events
 - `repo_context_missing`: run event metadata does not include `owner` and `repo`.
 - `repo_not_bound`: run repository was not bound to a runner.
 - `actor_not_allowed_for_write`: write-capable run came from an actor outside the binding allowlist.
-- `slack_channel_binding_not_found`: Slack team/channel is not bound to a repo.
+- `channel_binding_not_found`: the generic channel binding lookup did not find a route for this Slack team/channel.
+- `slack_channel_binding_not_found`: same condition through the legacy Slack compatibility endpoint.
 - `run_not_claimed_by_runner`: heartbeat came from the wrong runner or after lease loss.
 - `No OpenTag run available`: no pending run is claimable for that runner's bindings.
 

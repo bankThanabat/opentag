@@ -153,6 +153,7 @@ Example config fragment:
     {
       "teamId": "T123",
       "channelId": "C123",
+      "repoProvider": "github",
       "owner": "acme",
       "repo": "demo"
     }

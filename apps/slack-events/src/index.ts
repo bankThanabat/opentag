@@ -68,10 +68,20 @@ serve({
     slackApps,
     async resolveChannelBinding(input) {
       try {
-        const { binding } = await dispatcherClient.getSlackChannelBinding(input);
-        return binding;
+        const { binding } = await dispatcherClient.getChannelBinding({
+          provider: "slack",
+          accountId: input.teamId,
+          conversationId: input.channelId
+        });
+        return {
+          teamId: binding.accountId,
+          channelId: binding.conversationId,
+          repoProvider: binding.repoProvider,
+          owner: binding.owner,
+          repo: binding.repo
+        };
       } catch (error) {
-        if (error instanceof Error && error.message.includes("slack_channel_binding_not_found")) {
+        if (error instanceof Error && error.message.includes("channel_binding_not_found")) {
           return null;
         }
         throw error;

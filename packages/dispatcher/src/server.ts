@@ -42,8 +42,19 @@ const CreateRepoBindingSchema = z.object({
 const CreateSlackChannelBindingSchema = z.object({
   teamId: z.string().min(1),
   channelId: z.string().min(1),
+  repoProvider: z.string().min(1).default("github"),
   owner: z.string().min(1),
   repo: z.string().min(1)
+});
+
+const CreateChannelBindingSchema = z.object({
+  provider: z.string().min(1),
+  accountId: z.string().min(1),
+  conversationId: z.string().min(1),
+  repoProvider: z.string().min(1),
+  owner: z.string().min(1),
+  repo: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()).optional()
 });
 
 const UpsertPolicyRuleSchema = z.object({
@@ -402,6 +413,30 @@ export function createDispatcherApp(input: {
     if (!threadId) return c.json({ error: "thread_id_required" }, 422);
     const metrics = await repo.getWorkThreadMetrics({ threadId });
     return c.json({ metrics });
+  });
+
+  app.post("/v1/channel-bindings", async (c) => {
+    const parsed = CreateChannelBindingSchema.parse(await c.req.json());
+    await repo.upsertChannelBinding({
+      provider: parsed.provider,
+      accountId: parsed.accountId,
+      conversationId: parsed.conversationId,
+      repoProvider: parsed.repoProvider,
+      owner: parsed.owner,
+      repo: parsed.repo,
+      ...(parsed.metadata ? { metadata: parsed.metadata } : {})
+    });
+    return c.json({ ok: true }, 201);
+  });
+
+  app.get("/v1/channel-bindings/:provider/:accountId/:conversationId", async (c) => {
+    const binding = await repo.getChannelBinding({
+      provider: c.req.param("provider"),
+      accountId: c.req.param("accountId"),
+      conversationId: c.req.param("conversationId")
+    });
+    if (!binding) return c.json({ error: "channel_binding_not_found" }, 404);
+    return c.json({ binding });
   });
 
   app.post("/v1/slack-channel-bindings", async (c) => {

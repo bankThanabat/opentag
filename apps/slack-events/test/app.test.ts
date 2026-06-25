@@ -61,7 +61,7 @@ describe("Slack events app", () => {
     const app = createSlackEventsApp({
       slackApps: [{ appId: "A_GEMINI", signingSecret: "secret", agentId: "gemini" }],
       async resolveChannelBinding() {
-        return { teamId: "T123", channelId: "C123", owner: "acme", repo: "demo" };
+        return { teamId: "T123", channelId: "C123", repoProvider: "gitlab", owner: "acme", repo: "demo" };
       },
       createRun,
       now: () => now,
@@ -87,6 +87,7 @@ describe("Slack events app", () => {
     expect(createRun).toHaveBeenCalledOnce();
     const [event] = createRun.mock.calls[0] ?? [];
     expect(event.target.agentId).toBe("gemini");
+    expect(event.metadata.repoProvider).toBe("gitlab");
   });
 
   it("supports multiple Slack apps with different secrets and agent ids", async () => {

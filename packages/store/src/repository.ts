@@ -33,6 +33,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import {
   applyPlans,
   approvalDecisions,
+  channelBindings,
   repoBindings,
   repoMutationMappings,
   repoPolicyRules,
@@ -40,7 +41,6 @@ import {
   runEvents,
   runners,
   runs,
-  slackChannelBindings,
   suggestedChanges
 } from "./schema.js";
 
@@ -93,9 +93,20 @@ export type RepoBinding = {
   allowedActors?: string[];
 };
 
+export type ChannelBinding = {
+  provider: string;
+  accountId: string;
+  conversationId: string;
+  repoProvider: string;
+  owner: string;
+  repo: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type SlackChannelBinding = {
   teamId: string;
   channelId: string;
+  repoProvider?: string;
   owner: string;
   repo: string;
 };
@@ -235,6 +246,18 @@ function runnerFromRow(row: typeof runners.$inferSelect): RunnerRegistration {
     name: row.name,
     createdAt: row.createdAt,
     ...(row.heartbeatAt ? { heartbeatAt: row.heartbeatAt } : {})
+  };
+}
+
+function channelBindingFromRow(row: typeof channelBindings.$inferSelect): ChannelBinding {
+  return {
+    provider: row.provider,
+    accountId: row.accountId,
+    conversationId: row.conversationId,
+    repoProvider: row.repoProvider,
+    owner: row.owner,
+    repo: row.repo,
+    ...(row.metadataJson ? { metadata: JSON.parse(row.metadataJson) as Record<string, unknown> } : {})
   };
 }
 
@@ -552,21 +575,51 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       return rows.map((row) => AdapterMutationMappingSchema.parse(JSON.parse(row.mappingJson)));
     },
 
-    async createSlackChannelBinding(input: SlackChannelBinding): Promise<void> {
+    async upsertChannelBinding(input: ChannelBinding): Promise<void> {
       await db
-        .insert(slackChannelBindings)
+        .insert(channelBindings)
         .values({
-          teamId: input.teamId,
-          channelId: input.channelId,
+          provider: input.provider,
+          accountId: input.accountId,
+          conversationId: input.conversationId,
+          repoProvider: input.repoProvider,
           owner: input.owner,
           repo: input.repo,
+          metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
           createdAt: nowIso()
         })
         .onConflictDoUpdate({
-          target: [slackChannelBindings.teamId, slackChannelBindings.channelId],
+          target: [channelBindings.provider, channelBindings.accountId, channelBindings.conversationId],
           set: {
+            repoProvider: input.repoProvider,
             owner: input.owner,
-            repo: input.repo
+            repo: input.repo,
+            metadataJson: input.metadata ? JSON.stringify(input.metadata) : null
+          }
+        });
+    },
+
+    async createSlackChannelBinding(input: SlackChannelBinding): Promise<void> {
+      const repoProvider = input.repoProvider ?? "github";
+      await db
+        .insert(channelBindings)
+        .values({
+          provider: "slack",
+          accountId: input.teamId,
+          conversationId: input.channelId,
+          repoProvider,
+          owner: input.owner,
+          repo: input.repo,
+          metadataJson: null,
+          createdAt: nowIso()
+        })
+        .onConflictDoUpdate({
+          target: [channelBindings.provider, channelBindings.accountId, channelBindings.conversationId],
+          set: {
+            repoProvider,
+            owner: input.owner,
+            repo: input.repo,
+            metadataJson: null
           }
         });
     },
@@ -790,19 +843,47 @@ export function createOpenTagRepository(db: BetterSQLite3Database) {
       };
     },
 
+    async getChannelBinding(input: {
+      provider: string;
+      accountId: string;
+      conversationId: string;
+    }): Promise<ChannelBinding | null> {
+      const row = await db
+        .select()
+        .from(channelBindings)
+        .where(
+          and(
+            eq(channelBindings.provider, input.provider),
+            eq(channelBindings.accountId, input.accountId),
+            eq(channelBindings.conversationId, input.conversationId)
+          )
+        )
+        .limit(1)
+        .get();
+      return row ? channelBindingFromRow(row) : null;
+    },
+
     async getSlackChannelBinding(input: { teamId: string; channelId: string }): Promise<SlackChannelBinding | null> {
       const row = await db
         .select()
-        .from(slackChannelBindings)
-        .where(and(eq(slackChannelBindings.teamId, input.teamId), eq(slackChannelBindings.channelId, input.channelId)))
+        .from(channelBindings)
+        .where(
+          and(
+            eq(channelBindings.provider, "slack"),
+            eq(channelBindings.accountId, input.teamId),
+            eq(channelBindings.conversationId, input.channelId)
+          )
+        )
         .limit(1)
         .get();
       if (!row) return null;
+      const binding = channelBindingFromRow(row);
       return {
-        teamId: row.teamId,
-        channelId: row.channelId,
-        owner: row.owner,
-        repo: row.repo
+        teamId: binding.accountId,
+        channelId: binding.conversationId,
+        repoProvider: binding.repoProvider,
+        owner: binding.owner,
+        repo: binding.repo
       };
     },
 

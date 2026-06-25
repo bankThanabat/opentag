@@ -38,6 +38,11 @@ if [[ "${OPENTAG_GH_CREATE_PR:-false}" == "true" ]]; then
   PR_CREATE_PERMISSION=', { scope: "pr:create", reason: "open a pull request for completed code changes" }'
 fi
 
+if [[ ! -d "$CHECKOUT_PATH/.git" ]]; then
+  mkdir -p "$(dirname "$CHECKOUT_PATH")"
+  gh repo clone "${OWNER}/${REPO}" "$CHECKOUT_PATH" >/dev/null
+fi
+
 if [[ -z "$ISSUE_NUMBER" ]]; then
   if [[ "${OPENTAG_GH_CREATE_ISSUE:-false}" != "true" ]]; then
     echo "No OPENTAG_GH_TEST_ISSUE set and OPENTAG_GH_CREATE_ISSUE is not true." >&2
@@ -94,6 +99,9 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Starting dispatcher on :${OPENTAG_DISPATCHER_PORT}"
+for pid in $(lsof -ti "tcp:${OPENTAG_DISPATCHER_PORT}" 2>/dev/null); do
+  kill "$pid" 2>/dev/null || true
+done
 (
   export PORT="$OPENTAG_DISPATCHER_PORT"
   export OPENTAG_DATABASE_PATH="$DATABASE_PATH"

@@ -127,18 +127,25 @@ export const repoMutationMappings = sqliteTable(
   })
 );
 
-export const slackChannelBindings = sqliteTable(
-  "slack_channel_bindings",
+export const channelBindings = sqliteTable(
+  "channel_bindings",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    teamId: text("team_id").notNull(),
-    channelId: text("channel_id").notNull(),
+    provider: text("provider").notNull(),
+    accountId: text("account_id").notNull(),
+    conversationId: text("conversation_id").notNull(),
+    repoProvider: text("repo_provider").notNull(),
     owner: text("owner").notNull(),
     repo: text("repo").notNull(),
+    metadataJson: text("metadata_json"),
     createdAt: text("created_at").notNull()
   },
   (table) => ({
-    slackChannelUniqueIdx: uniqueIndex("slack_channel_bindings_team_channel_idx").on(table.teamId, table.channelId)
+    channelBindingUniqueIdx: uniqueIndex("channel_bindings_provider_account_conversation_idx").on(
+      table.provider,
+      table.accountId,
+      table.conversationId
+    )
   })
 );
 
@@ -263,16 +270,19 @@ export function migrateSchema(sqlite: Database.Database): void {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS repo_mutation_mappings_repo_id_idx
       ON repo_mutation_mappings(provider, owner, repo, id);
-    CREATE TABLE IF NOT EXISTS slack_channel_bindings (
+    CREATE TABLE IF NOT EXISTS channel_bindings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      team_id TEXT NOT NULL,
-      channel_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      repo_provider TEXT NOT NULL,
       owner TEXT NOT NULL,
       repo TEXT NOT NULL,
+      metadata_json TEXT,
       created_at TEXT NOT NULL
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS slack_channel_bindings_team_channel_idx
-      ON slack_channel_bindings(team_id, channel_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS channel_bindings_provider_account_conversation_idx
+      ON channel_bindings(provider, account_id, conversation_id);
     CREATE TABLE IF NOT EXISTS callback_deliveries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL,
@@ -304,6 +314,15 @@ export function migrateSchema(sqlite: Database.Database): void {
   }
   if (!columnNames.has("allowed_actors_json")) {
     sqlite.exec("ALTER TABLE repo_bindings ADD COLUMN allowed_actors_json TEXT");
+  }
+  const channelBindingColumns = sqlite.prepare("PRAGMA table_info(channel_bindings)").all() as { name: string }[];
+  const channelBindingColumnNames = new Set(channelBindingColumns.map((column) => column.name));
+  if (!channelBindingColumnNames.has("repo_provider")) {
+    sqlite.exec("ALTER TABLE channel_bindings ADD COLUMN repo_provider TEXT");
+    sqlite.exec("UPDATE channel_bindings SET repo_provider = 'github' WHERE repo_provider IS NULL");
+  }
+  if (!channelBindingColumnNames.has("metadata_json")) {
+    sqlite.exec("ALTER TABLE channel_bindings ADD COLUMN metadata_json TEXT");
   }
   const runColumns = sqlite.prepare("PRAGMA table_info(runs)").all() as { name: string }[];
   const runColumnNames = new Set(runColumns.map((column) => column.name));
@@ -376,5 +395,30 @@ export function migrateSchema(sqlite: Database.Database): void {
   }
   if (!callbackColumnNames.has("metadata_json")) {
     sqlite.exec("ALTER TABLE callback_deliveries ADD COLUMN metadata_json TEXT");
+  }
+  const legacySlackTable = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'slack_channel_bindings'")
+    .get() as { name: string } | undefined;
+  if (legacySlackTable) {
+    sqlite.exec(`
+      INSERT OR IGNORE INTO channel_bindings (
+        provider,
+        account_id,
+        conversation_id,
+        repo_provider,
+        owner,
+        repo,
+        created_at
+      )
+      SELECT
+        'slack',
+        team_id,
+        channel_id,
+        'github',
+        owner,
+        repo,
+        created_at
+      FROM slack_channel_bindings;
+    `);
   }
 }

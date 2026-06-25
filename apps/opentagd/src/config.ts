@@ -34,6 +34,7 @@ export const RepositoryBindingConfigSchema = z.object({
 export const SlackChannelBindingConfigSchema = z.object({
   teamId: z.string().min(1),
   channelId: z.string().min(1),
+  repoProvider: z.string().min(1).default("github"),
   owner: z.string().min(1),
   repo: z.string().min(1)
 });
@@ -169,6 +170,7 @@ export function loadConfigFromEnv(): OpenTagDaemonConfig {
             {
               teamId: process.env.OPENTAG_SLACK_TEAM_ID,
               channelId: process.env.OPENTAG_SLACK_CHANNEL_ID,
+              repoProvider: process.env.OPENTAG_SLACK_REPO_PROVIDER ?? "github",
               owner,
               repo
             }

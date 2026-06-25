@@ -139,22 +139,29 @@ export async function runDoctor(input: {
 
   for (const binding of input.config.slackChannels ?? []) {
     try {
-      const { binding: remoteBinding } = await client.getSlackChannelBinding({
-        teamId: binding.teamId,
-        channelId: binding.channelId
+      const { binding: remoteBinding } = await client.getChannelBinding({
+        provider: "slack",
+        accountId: binding.teamId,
+        conversationId: binding.channelId
       });
       checks.push(
-        remoteBinding.owner === binding.owner && remoteBinding.repo === binding.repo
-          ? check("ok", `${binding.teamId}/${binding.channelId} Slack binding`, `${remoteBinding.owner}/${remoteBinding.repo}`)
+        remoteBinding.owner === binding.owner &&
+        remoteBinding.repo === binding.repo &&
+        (remoteBinding.repoProvider ?? "github") === binding.repoProvider
+          ? check(
+              "ok",
+              `${binding.teamId}/${binding.channelId} Slack binding`,
+              `${remoteBinding.repoProvider ?? "github"}:${remoteBinding.owner}/${remoteBinding.repo}`
+            )
           : check(
               "fail",
               `${binding.teamId}/${binding.channelId} Slack binding`,
-              `Bound to ${remoteBinding.owner}/${remoteBinding.repo}, expected ${binding.owner}/${binding.repo}`
+              `Bound to ${(remoteBinding.repoProvider ?? "github")}:${remoteBinding.owner}/${remoteBinding.repo}, expected ${binding.repoProvider}:${binding.owner}/${binding.repo}`
             )
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      checks.push(check(message.includes("slack_channel_binding_not_found") ? "warn" : "fail", `${binding.teamId}/${binding.channelId} Slack binding`, message));
+      checks.push(check(message.includes("channel_binding_not_found") ? "warn" : "fail", `${binding.teamId}/${binding.channelId} Slack binding`, message));
     }
   }
 
