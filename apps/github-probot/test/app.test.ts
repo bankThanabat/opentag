@@ -108,6 +108,41 @@ describe("GitHub Probot handler", () => {
     expect(postComment).not.toHaveBeenCalled();
   });
 
+  it("does not post a local acknowledgement when the dispatcher does not create a run", async () => {
+    const createRun = vi.fn(async () => ({}));
+    const postComment = vi.fn(async () => undefined);
+
+    await handleIssueCommentCreated({
+      payload: {
+        comment: {
+          id: 123,
+          body: "@opentag fix this",
+          html_url: "https://github.com/acme/demo/issues/1#issuecomment-123"
+        },
+        issue: {
+          html_url: "https://github.com/acme/demo/issues/1",
+          comments_url: "https://api.github.com/repos/acme/demo/issues/1/comments",
+          number: 1
+        },
+        repository: {
+          name: "demo",
+          private: false,
+          owner: { login: "acme" }
+        },
+        sender: {
+          id: 42,
+          login: "octocat"
+        }
+      },
+      createRun,
+      postComment,
+      now: () => "2026-06-24T00:00:00.000Z"
+    });
+
+    expect(createRun).toHaveBeenCalledOnce();
+    expect(postComment).not.toHaveBeenCalled();
+  });
+
   it("creates a dispatcher run for an opentag PR review comment", async () => {
     const createRun = vi.fn(async () => ({ runId: "run_2" }));
     const postComment = vi.fn(async () => undefined);

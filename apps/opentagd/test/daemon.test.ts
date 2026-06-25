@@ -1,4 +1,4 @@
-import type { OpenTagEvent, OpenTagRun } from "@opentag/core";
+import type { ContextPacket, OpenTagEvent, OpenTagRun } from "@opentag/core";
 import { createEchoExecutor } from "@opentag/runner";
 import { describe, expect, it } from "vitest";
 import { runOneDaemonIteration } from "../src/daemon.js";
@@ -8,6 +8,11 @@ const run: OpenTagRun = {
   eventId: "evt_1",
   status: "assigned",
   assignedRunnerId: "runner_1",
+  contextPacket: {
+    summary: "Fix the issue from the source thread.",
+    sourcePointers: [],
+    exclusions: ["Do not touch unrelated files."]
+  },
   createdAt: "2026-06-24T00:00:00.000Z",
   updatedAt: "2026-06-24T00:00:00.000Z"
 };
@@ -235,5 +240,68 @@ describe("opentagd", () => {
 
     expect(calls.some((call) => call === "heartbeat:run_1")).toBe(true);
     expect(calls.at(-1)).toBe("complete:run_1:success:done");
+  });
+
+  it("passes the run context packet into executor input", async () => {
+    let seenPacket: ContextPacket | undefined;
+    const localRun: OpenTagRun = {
+      ...run,
+      contextPacket: {
+        summary: "Fix the issue from the source thread.",
+        sourcePointers: [],
+        exclusions: ["Do not touch unrelated files."]
+      }
+    };
+
+    await runOneDaemonIteration({
+      runnerId: "runner_1",
+      executors: {
+        capture: {
+          id: "capture",
+          displayName: "Capture Executor",
+          async canRun(input) {
+            seenPacket = input.contextPacket;
+            return { ready: true };
+          },
+          async run(input) {
+            seenPacket = input.contextPacket;
+            return { conclusion: "success", summary: "captured" };
+          },
+          async cancel() {
+            return;
+          }
+        }
+      },
+      client: {
+        async claim() {
+          return {
+            run: localRun,
+            event: {
+              ...event,
+              permissions: [
+                ...event.permissions,
+                { scope: "repo:write", reason: "write branch" }
+              ]
+            }
+          };
+        },
+        async markRunning() {
+          return;
+        },
+        async heartbeat() {
+          return;
+        },
+        async progress() {
+          return;
+        },
+        async complete() {
+          return;
+        }
+      },
+      repositories: [{ provider: "github", owner: "acme", repo: "demo", checkoutPath: "/tmp/demo", defaultExecutor: "capture" }]
+    });
+
+    expect(seenPacket?.summary).toBe("Fix the issue from the source thread.");
+    expect(seenPacket?.exclusions).toEqual(["Do not touch unrelated files."]);
   });
 });

@@ -3,6 +3,7 @@ import {
   assembleContextPacketFromEvent,
   contextPacketFromEvent,
   createAdapterMutationCompilerRegistry,
+  defaultRunEventMetadata,
   preflightMutationIntent,
   protocolRunFieldsFromEvent,
   workThreadFromEvent
@@ -80,6 +81,12 @@ describe("protocol helpers", () => {
     const packet = contextPacketFromEvent(githubEvent);
 
     expect(packet.sourcePointers).toHaveLength(2);
+    expect(packet.intent).toMatchObject({
+      rawText: "fix the flaky test",
+      normalizedIntent: "fix",
+      requestedBy: { provider: "github", providerUserId: "42", handle: "octocat" }
+    });
+    expect(packet.sources?.map((source) => source.role)).toEqual(["primary", "primary"]);
     expect(packet.assembly?.stages).toEqual(["collect", "classify", "filter", "preserve", "summarize", "budget", "emit"]);
     expect(packet.risks?.[0]).toContain("repo:write");
     expect(packet.exclusions?.[0]).toContain("explicit capability");
@@ -122,6 +129,21 @@ describe("protocol helpers", () => {
     expect(packet.summary).toBe("Hooked: fix the flaky test");
     expect(packet.sourcePointers).toHaveLength(1);
     expect(packet.facts?.map((fact) => fact.text)).toContain("hook-added fact");
+  });
+
+  it("shares default run event metadata across runtime layers", () => {
+    expect(defaultRunEventMetadata("callback.final.delivered")).toEqual({
+      visibility: "human",
+      importance: "high"
+    });
+    expect(defaultRunEventMetadata("run.waiting_for_permission")).toEqual({
+      visibility: "audit",
+      importance: "blocking"
+    });
+    expect(defaultRunEventMetadata("run.created")).toEqual({
+      visibility: "audit",
+      importance: "low"
+    });
   });
 
   it("compiles mutation intents through adapter compiler registry", () => {

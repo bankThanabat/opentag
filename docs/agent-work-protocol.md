@@ -2,7 +2,11 @@
 
 ## Status
 
-Design proposal, 2026-06-24.
+Long-horizon protocol direction, 2026-06-24.
+
+This document captures the broader Agent Work Protocol shape and product
+direction. For the current v0.2 runtime-alignment changes that are intended to
+match the codebase, see [Thread Runtime Alignment](./thread-runtime-design.md).
 
 This document extends the original OpenTag design from "open agent mentions" to
 an auditable Agent Work Protocol. It is intentionally a design document, not an

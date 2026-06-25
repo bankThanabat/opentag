@@ -2,7 +2,11 @@
 
 ## Status
 
-Implementation-ready draft, 2026-06-24
+Architecture baseline, 2026-06-24.
+
+This document captures the original OpenTag system shape and package
+boundaries. For the current runtime-alignment work that matches the codebase,
+see [Thread Runtime Alignment](./thread-runtime-design.md).
 
 ## One-Liner
 

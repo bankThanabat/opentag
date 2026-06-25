@@ -79,7 +79,7 @@ export async function runOneDaemonIteration(input: {
         })
       : binding.checkoutPath;
 
-  const securityAssessment = assessRunnerSecurity({
+      const securityAssessment = assessRunnerSecurity({
     executorId,
     workspacePath: binding.checkoutPath,
     executionPath,
@@ -104,16 +104,17 @@ export async function runOneDaemonIteration(input: {
     return true;
   }
 
-  const readiness = await executor.canRun({
-    runId: claimed.run.id,
-    workspacePath: binding.checkoutPath,
-    command: claimed.event.command,
-    context: claimed.event.context,
-    permissions: claimed.event.permissions,
-    ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {}),
-    ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {}),
-    ...(binding.keepWorktree !== undefined ? { keepWorktree: binding.keepWorktree } : {})
-  });
+      const readiness = await executor.canRun({
+        runId: claimed.run.id,
+        workspacePath: binding.checkoutPath,
+        command: claimed.event.command,
+        context: claimed.event.context,
+        ...(claimed.run.contextPacket ? { contextPacket: claimed.run.contextPacket } : {}),
+        permissions: claimed.event.permissions,
+        ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {}),
+        ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {}),
+        ...(binding.keepWorktree !== undefined ? { keepWorktree: binding.keepWorktree } : {})
+      });
   if (!readiness.ready) {
     await input.client.complete(claimed.run.id, {
       conclusion: "needs_human",
@@ -141,6 +142,7 @@ export async function runOneDaemonIteration(input: {
         workspacePath: binding.checkoutPath,
         command: claimed.event.command,
         context: claimed.event.context,
+        ...(claimed.run.contextPacket ? { contextPacket: claimed.run.contextPacket } : {}),
         permissions: claimed.event.permissions,
         ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {}),
         ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {}),

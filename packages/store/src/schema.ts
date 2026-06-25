@@ -8,6 +8,7 @@ export const runs = sqliteTable(
     eventId: text("event_id").notNull(),
     status: text("status").notNull(),
     eventJson: text("event_json").notNull(),
+    contextPacketJson: text("context_packet_json"),
     resultJson: text("result_json"),
     assignedRunnerId: text("assigned_runner_id"),
     executor: text("executor"),
@@ -19,6 +20,7 @@ export const runs = sqliteTable(
     repoOwner: text("repo_owner"),
     repoName: text("repo_name"),
     workThreadId: text("work_thread_id"),
+    conversationKey: text("conversation_key"),
     leasedAt: text("leased_at"),
     leaseExpiresAt: text("lease_expires_at"),
     heartbeatAt: text("heartbeat_at"),
@@ -29,7 +31,28 @@ export const runs = sqliteTable(
     statusIdx: index("runs_status_idx").on(table.status),
     runnerIdx: index("runs_runner_idx").on(table.assignedRunnerId),
     repoIdx: index("runs_repo_idx").on(table.repoProvider, table.repoOwner, table.repoName),
-    workThreadIdx: index("runs_work_thread_idx").on(table.workThreadId)
+    workThreadIdx: index("runs_work_thread_idx").on(table.workThreadId),
+    conversationIdx: index("runs_conversation_idx").on(table.conversationKey)
+  })
+);
+
+export const followUpRequests = sqliteTable(
+  "follow_up_requests",
+  {
+    id: text("id").primaryKey(),
+    sourceEventId: text("source_event_id").notNull(),
+    conversationKey: text("conversation_key").notNull(),
+    activeRunId: text("active_run_id"),
+    eventJson: text("event_json").notNull(),
+    decisionJson: text("decision_json").notNull(),
+    status: text("status").notNull(),
+    createdRunId: text("created_run_id"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => ({
+    sourceEventIdx: uniqueIndex("follow_up_requests_source_event_idx").on(table.sourceEventId),
+    conversationIdx: index("follow_up_requests_conversation_idx").on(table.conversationKey, table.status)
   })
 );
 
@@ -180,6 +203,7 @@ export function migrateSchema(sqlite: Database.Database): void {
       event_id TEXT NOT NULL,
       status TEXT NOT NULL,
       event_json TEXT NOT NULL,
+      context_packet_json TEXT,
       result_json TEXT,
       assigned_runner_id TEXT,
       executor TEXT,
@@ -191,6 +215,7 @@ export function migrateSchema(sqlite: Database.Database): void {
       repo_owner TEXT,
       repo_name TEXT,
       work_thread_id TEXT,
+      conversation_key TEXT,
       leased_at TEXT,
       lease_expires_at TEXT,
       heartbeat_at TEXT,
@@ -199,6 +224,7 @@ export function migrateSchema(sqlite: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS runs_status_idx ON runs(status);
     CREATE INDEX IF NOT EXISTS runs_runner_idx ON runs(assigned_runner_id);
+    CREATE INDEX IF NOT EXISTS runs_conversation_idx ON runs(conversation_key);
     CREATE TABLE IF NOT EXISTS run_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL,
@@ -303,6 +329,22 @@ export function migrateSchema(sqlite: Database.Database): void {
       ON callback_deliveries(run_id);
     CREATE INDEX IF NOT EXISTS callback_deliveries_status_idx
       ON callback_deliveries(status);
+    CREATE TABLE IF NOT EXISTS follow_up_requests (
+      id TEXT PRIMARY KEY,
+      source_event_id TEXT NOT NULL,
+      conversation_key TEXT NOT NULL,
+      active_run_id TEXT,
+      event_json TEXT NOT NULL,
+      decision_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_run_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS follow_up_requests_source_event_idx
+      ON follow_up_requests(source_event_id);
+    CREATE INDEX IF NOT EXISTS follow_up_requests_conversation_idx
+      ON follow_up_requests(conversation_key, status);
   `);
   const columns = sqlite.prepare("PRAGMA table_info(repo_bindings)").all() as { name: string }[];
   const columnNames = new Set(columns.map((column) => column.name));
@@ -328,6 +370,9 @@ export function migrateSchema(sqlite: Database.Database): void {
   const runColumnNames = new Set(runColumns.map((column) => column.name));
   if (!runColumnNames.has("leased_at")) {
     sqlite.exec("ALTER TABLE runs ADD COLUMN leased_at TEXT");
+  }
+  if (!runColumnNames.has("context_packet_json")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN context_packet_json TEXT");
   }
   if (!runColumnNames.has("heartbeat_at")) {
     sqlite.exec("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT");
@@ -356,8 +401,12 @@ export function migrateSchema(sqlite: Database.Database): void {
   if (!runColumnNames.has("work_thread_id")) {
     sqlite.exec("ALTER TABLE runs ADD COLUMN work_thread_id TEXT");
   }
+  if (!runColumnNames.has("conversation_key")) {
+    sqlite.exec("ALTER TABLE runs ADD COLUMN conversation_key TEXT");
+  }
   sqlite.exec("CREATE INDEX IF NOT EXISTS runs_repo_idx ON runs(repo_provider, repo_owner, repo_name)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS runs_work_thread_idx ON runs(work_thread_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS runs_conversation_idx ON runs(conversation_key)");
   sqlite.exec(`
     UPDATE runs
     SET event_id = event_id || '#duplicate:' || id

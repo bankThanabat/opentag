@@ -8,6 +8,7 @@ import {
   OpenTagRunResultSchema,
   OpenTagRunSchema,
   PolicyResolutionSchema,
+  RunAdmissionDecisionSchema,
   RunEventSchema,
   SuccessMetricNameSchema,
   SuggestedChangesSnapshotSchema,
@@ -195,6 +196,19 @@ describe("Agent Work Protocol schemas", () => {
     const packet = ContextPacketSchema.parse({
       summary: "Investigate the failing test on the linked issue.",
       sourcePointers: [{ kind: "github.issue", uri: "https://github.com/acme/demo/issues/123", visibility: "public" }],
+      intent: {
+        rawText: "@opentag investigate flaky test",
+        normalizedIntent: "investigate",
+        requestedBy: { provider: "github", providerUserId: "42", handle: "octocat" }
+      },
+      sources: [
+        {
+          pointer: { kind: "github.issue", uri: "https://github.com/acme/demo/issues/123", visibility: "public" },
+          role: "primary",
+          included: true,
+          reason: "The issue is the primary source for the request."
+        }
+      ],
       facts: [{ text: "The issue reports a flaky test in CI.", sourceUri: "https://github.com/acme/demo/issues/123" }],
       risks: ["The executor should not push directly to the default branch."],
       exclusions: ["Do not change unrelated Slack callback presentation work."],
@@ -206,6 +220,8 @@ describe("Agent Work Protocol schemas", () => {
     });
 
     expect(packet.assembly?.stages).toContain("budget");
+    expect(packet.intent?.normalizedIntent).toBe("investigate");
+    expect(packet.sources?.[0]?.role).toBe("primary");
   });
 
   it("accepts run events with visibility and importance", () => {
@@ -221,6 +237,20 @@ describe("Agent Work Protocol schemas", () => {
 
     expect(event.visibility).toBe("human");
     expect(event.importance).toBe("blocking");
+  });
+
+  it("accepts run admission decisions", () => {
+    const decision = RunAdmissionDecisionSchema.parse({
+      action: "drop_duplicate",
+      reason: "Source event already created a run.",
+      reasonCode: "duplicate_source_event",
+      decidedAt: "2026-06-25T00:00:00.000Z",
+      activeRunId: "run_existing",
+      eventId: "evt_duplicate"
+    });
+
+    expect(decision.reasonCode).toBe("duplicate_source_event");
+    expect(decision.activeRunId).toBe("run_existing");
   });
 
   it("models capability contracts and policy resolution separately from platform permissions", () => {

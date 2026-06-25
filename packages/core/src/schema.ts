@@ -99,14 +99,35 @@ export const ContextPointerSchema = z.object({
 
 export const ContextPacketAssemblyStageSchema = z.enum(["collect", "classify", "filter", "preserve", "summarize", "budget", "emit"]);
 
+export const ContextPacketIntentSchema = z.object({
+  rawText: z.string().min(1),
+  normalizedIntent: z.string().min(1),
+  requestedBy: ActorIdentitySchema
+});
+
+export const ContextPacketSourceRoleSchema = z.enum(["primary", "supporting", "background"]);
+
+export const ContextPacketSourceSchema = z.object({
+  pointer: ContextPointerSchema,
+  role: ContextPacketSourceRoleSchema,
+  included: z.boolean(),
+  reason: z.string().min(1)
+});
+
+export const ContextPacketFactConfidenceSchema = z.enum(["observed", "inferred", "uncertain"]);
+
 export const ContextPacketSchema = z.object({
   summary: z.string().min(1),
   sourcePointers: z.array(ContextPointerSchema),
+  intent: ContextPacketIntentSchema.optional(),
+  sources: z.array(ContextPacketSourceSchema).optional(),
   facts: z
     .array(
       z.object({
         text: z.string().min(1),
-        sourceUri: z.string().min(1).optional()
+        sourceUri: z.string().min(1).optional(),
+        source: ContextPointerSchema.optional(),
+        confidence: ContextPacketFactConfidenceSchema.optional()
       })
     )
     .optional(),
@@ -232,6 +253,51 @@ export const WorkThreadSchema = z.object({
   workItemReference: WorkItemReferenceSchema,
   primaryAnchor: ConversationAnchorSchema,
   secondaryAnchors: z.array(ConversationAnchorSchema).optional()
+});
+
+export const RunAdmissionActionSchema = z.enum([
+  "start",
+  "drop_duplicate",
+  "queue_follow_up",
+  "attach_to_active_run",
+  "needs_human_decision"
+]);
+
+export const RunAdmissionReasonCodeSchema = z.enum([
+  "new_event",
+  "duplicate_source_event",
+  "active_run_same_thread",
+  "active_write_run_same_thread",
+  "scope_change_requires_decision",
+  "policy_rejected",
+  "repo_context_missing",
+  "repo_not_bound",
+  "actor_not_allowed_for_write",
+  "agent_access_profile_denied"
+]);
+
+export const RunAdmissionDecisionSchema = z.object({
+  action: RunAdmissionActionSchema,
+  reason: z.string().min(1),
+  reasonCode: RunAdmissionReasonCodeSchema,
+  decidedAt: z.string().datetime(),
+  activeRunId: z.string().min(1).optional(),
+  eventId: z.string().min(1).optional()
+});
+
+export const FollowUpRequestStatusSchema = z.enum(["queued", "promoting", "promoted", "cancelled"]);
+
+export const FollowUpRequestSchema = z.object({
+  id: z.string().min(1),
+  sourceEventId: z.string().min(1),
+  conversationKey: z.string().min(1),
+  activeRunId: z.string().min(1).optional(),
+  event: z.lazy(() => OpenTagEventSchema),
+  decision: RunAdmissionDecisionSchema,
+  status: FollowUpRequestStatusSchema,
+  createdRunId: z.string().min(1).optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
 });
 
 export const RunEventVisibilitySchema = z.enum(["human", "audit", "debug"]);
@@ -419,6 +485,10 @@ export type CommandParseDiagnostic = z.infer<typeof CommandParseDiagnosticSchema
 export type CommandReference = z.infer<typeof CommandReferenceSchema>;
 export type ContextPointer = z.infer<typeof ContextPointerSchema>;
 export type ContextPacketAssemblyStage = z.infer<typeof ContextPacketAssemblyStageSchema>;
+export type ContextPacketIntent = z.infer<typeof ContextPacketIntentSchema>;
+export type ContextPacketSourceRole = z.infer<typeof ContextPacketSourceRoleSchema>;
+export type ContextPacketSource = z.infer<typeof ContextPacketSourceSchema>;
+export type ContextPacketFactConfidence = z.infer<typeof ContextPacketFactConfidenceSchema>;
 export type ContextPacket = z.infer<typeof ContextPacketSchema>;
 export type PermissionGrant = z.infer<typeof PermissionGrantSchema>;
 export type CapabilityClass = z.infer<typeof CapabilityClassSchema>;
@@ -433,6 +503,11 @@ export type CallbackRoute = z.infer<typeof CallbackRouteSchema>;
 export type WorkItemReference = z.infer<typeof WorkItemReferenceSchema>;
 export type ConversationAnchor = z.infer<typeof ConversationAnchorSchema>;
 export type WorkThread = z.infer<typeof WorkThreadSchema>;
+export type RunAdmissionAction = z.infer<typeof RunAdmissionActionSchema>;
+export type RunAdmissionReasonCode = z.infer<typeof RunAdmissionReasonCodeSchema>;
+export type RunAdmissionDecision = z.infer<typeof RunAdmissionDecisionSchema>;
+export type FollowUpRequestStatus = z.infer<typeof FollowUpRequestStatusSchema>;
+export type FollowUpRequest = z.infer<typeof FollowUpRequestSchema>;
 export type RunEventVisibility = z.infer<typeof RunEventVisibilitySchema>;
 export type RunEventImportance = z.infer<typeof RunEventImportanceSchema>;
 export type RunEvent = z.infer<typeof RunEventSchema>;

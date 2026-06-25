@@ -32,6 +32,13 @@ describe("@opentag/client", () => {
       fetchImpl: async (url, init) => {
         requests.push({ url: String(url), init });
         return jsonResponse({
+          decision: {
+            action: "start",
+            reason: "accepted",
+            reasonCode: "new_event",
+            decidedAt: "2026-06-24T00:00:00.000Z",
+            eventId: "evt_1"
+          },
           run: {
             id: "run_1",
             eventId: "evt_1",
@@ -43,9 +50,9 @@ describe("@opentag/client", () => {
       }
     });
 
-    const { run } = await client.createRun({ runId: "run_1", event });
+    const result = await client.createRun({ runId: "run_1", event });
 
-    expect(run.id).toBe("run_1");
+    expect(result).toMatchObject({ outcome: "run_created", run: { id: "run_1" } });
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe("http://dispatcher.test/v1/runs");
     expect(requests[0]?.init?.headers).toMatchObject({
@@ -99,6 +106,142 @@ describe("@opentag/client", () => {
     await expect(client.createRun({ runId: "run_1", event })).rejects.toThrow(
       'createRun failed: 403 {"error":"repo_not_bound"}'
     );
+  });
+
+  it("parses follow-up queued run responses", async () => {
+    const client = createOpenTagClient({
+      dispatcherUrl: "http://dispatcher.test",
+      fetchImpl: async () =>
+        jsonResponse(
+          {
+            decision: {
+              action: "queue_follow_up",
+              reason: "active run exists",
+              reasonCode: "active_run_same_thread",
+              decidedAt: "2026-06-24T00:00:00.000Z",
+              activeRunId: "run_active",
+              eventId: "evt_1"
+            },
+            followUpRequest: {
+              id: "follow_up_1",
+              sourceEventId: "evt_1",
+              conversationKey: "github:https://api.github.com/repos/acme/demo/issues/1/comments",
+              activeRunId: "run_active",
+              event,
+              decision: {
+                action: "queue_follow_up",
+                reason: "active run exists",
+                reasonCode: "active_run_same_thread",
+                decidedAt: "2026-06-24T00:00:00.000Z",
+                activeRunId: "run_active",
+                eventId: "evt_1"
+              },
+              status: "queued",
+              createdAt: "2026-06-24T00:00:00.000Z",
+              updatedAt: "2026-06-24T00:00:00.000Z"
+            }
+          },
+          202
+        )
+    });
+
+    await expect(client.createRun({ runId: "run_1", event })).resolves.toMatchObject({
+      outcome: "follow_up_queued",
+      followUpRequest: { id: "follow_up_1" }
+    });
+  });
+
+  it("parses needs-human-decision responses", async () => {
+    const client = createOpenTagClient({
+      dispatcherUrl: "http://dispatcher.test",
+      fetchImpl: async () =>
+        jsonResponse(
+          {
+            decision: {
+              action: "needs_human_decision",
+              reason: "repo binding missing",
+              reasonCode: "repo_not_bound",
+              decidedAt: "2026-06-24T00:00:00.000Z",
+              eventId: "evt_1"
+            }
+          },
+          202
+        )
+    });
+
+    await expect(client.createRun({ runId: "run_1", event })).resolves.toMatchObject({
+      outcome: "needs_human_decision",
+      decision: { reasonCode: "repo_not_bound" }
+    });
+  });
+
+  it("loads and promotes follow-up requests", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenTagClient({
+      dispatcherUrl: "http://dispatcher.test",
+      fetchImpl: async (url, init) => {
+        requests.push({ url: String(url), init });
+        if (String(url).endsWith("/create-run")) {
+          return jsonResponse({
+            followUpRequest: {
+              id: "follow_up_1",
+              sourceEventId: "evt_1",
+              conversationKey: "github:https://api.github.com/repos/acme/demo/issues/1/comments",
+              event,
+              decision: {
+                action: "queue_follow_up",
+                reason: "active run exists",
+                reasonCode: "active_run_same_thread",
+                decidedAt: "2026-06-24T00:00:00.000Z",
+                eventId: "evt_1"
+              },
+              status: "promoted",
+              createdRunId: "run_2",
+              createdAt: "2026-06-24T00:00:00.000Z",
+              updatedAt: "2026-06-24T00:01:00.000Z"
+            },
+            run: {
+              id: "run_2",
+              eventId: "evt_1",
+              status: "queued",
+              createdAt: "2026-06-24T00:01:00.000Z",
+              updatedAt: "2026-06-24T00:01:00.000Z"
+            }
+          });
+        }
+        return jsonResponse({
+          followUpRequest: {
+            id: "follow_up_1",
+            sourceEventId: "evt_1",
+            conversationKey: "github:https://api.github.com/repos/acme/demo/issues/1/comments",
+            event,
+            decision: {
+              action: "queue_follow_up",
+              reason: "active run exists",
+              reasonCode: "active_run_same_thread",
+              decidedAt: "2026-06-24T00:00:00.000Z",
+              eventId: "evt_1"
+            },
+            status: "queued",
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z"
+          }
+        });
+      }
+    });
+
+    await expect(client.getFollowUpRequest({ id: "follow_up_1" })).resolves.toMatchObject({
+      followUpRequest: { id: "follow_up_1", status: "queued" }
+    });
+    await expect(client.createRunFromFollowUpRequest({ id: "follow_up_1", runId: "run_2" })).resolves.toMatchObject({
+      followUpRequest: { id: "follow_up_1", status: "promoted", createdRunId: "run_2" },
+      run: { id: "run_2" }
+    });
+
+    expect(requests.map((request) => request.url)).toEqual([
+      "http://dispatcher.test/v1/follow-up-requests/follow_up_1",
+      "http://dispatcher.test/v1/follow-up-requests/follow_up_1/create-run"
+    ]);
   });
 
   it("calls proposal approval and apply-plan endpoints", async () => {

@@ -107,8 +107,93 @@ describe("dispatcher API", () => {
     });
     expect(secondResponse.status).toBe(200);
     await expect(secondResponse.json()).resolves.toMatchObject({
+      decision: {
+        action: "drop_duplicate",
+        reasonCode: "duplicate_source_event"
+      },
       run: { id: "run_duplicate_1" },
       idempotentReplay: true
+    });
+  });
+
+  it("queues same-thread work as a durable follow-up when a run is already active", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        workspacePath: "/Users/test/demo",
+        defaultExecutor: "echo"
+      })
+    });
+
+    const first = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_active_1", event: { ...validEvent, id: "evt_active_1", sourceEventId: "comment_active_1" } })
+    });
+    expect(first.status).toBe(201);
+
+    await app.request("/v1/runners/runner_1/claim", { method: "POST" });
+
+    const second = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        runId: "follow_up_1",
+        event: {
+          ...validEvent,
+          id: "evt_follow_up_1",
+          sourceEventId: "comment_follow_up_1",
+          command: { rawText: "fix this after the current run", intent: "fix", args: {} }
+        }
+      })
+    });
+    expect(second.status).toBe(202);
+    const secondJson = await second.json();
+    expect(secondJson).toMatchObject({
+      decision: {
+        action: "queue_follow_up",
+        reasonCode: "active_run_same_thread",
+        activeRunId: "run_active_1"
+      },
+      followUpRequest: {
+        id: "follow_up_1",
+        sourceEventId: "evt_follow_up_1",
+        status: "queued"
+      }
+    });
+
+    const getFollowUp = await app.request("/v1/follow-up-requests/follow_up_1");
+    expect(getFollowUp.status).toBe(200);
+    await expect(getFollowUp.json()).resolves.toMatchObject({
+      followUpRequest: {
+        id: "follow_up_1",
+        decision: { action: "queue_follow_up" }
+      }
+    });
+
+    const promote = await app.request("/v1/follow-up-requests/follow_up_1/create-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_from_follow_up_1" })
+    });
+    expect(promote.status).toBe(201);
+    await expect(promote.json()).resolves.toMatchObject({
+      followUpRequest: {
+        id: "follow_up_1",
+        status: "promoted",
+        createdRunId: "run_from_follow_up_1"
+      },
+      run: {
+        id: "run_from_follow_up_1",
+        parentRunId: "run_active_1"
+      }
     });
   });
 
@@ -218,6 +303,7 @@ describe("dispatcher API", () => {
     const eventsResponse = await app.request("/v1/runs/run_2/events");
     const { events } = await eventsResponse.json();
     expect(events.map((event: { type: string }) => event.type)).toEqual([
+      "admission.decided",
       "run.created",
       "context_packet.generated",
       "callback.acknowledgement.queued",
@@ -234,6 +320,10 @@ describe("dispatcher API", () => {
       visibility: "audit",
       importance: "normal",
       message: "running tests"
+    });
+    expect(events.find((event: { type: string }) => event.type === "admission.decided")).toMatchObject({
+      visibility: "audit",
+      importance: "normal"
     });
     expect(events.find((event: { type: string }) => event.type === "context_packet.generated")).toMatchObject({
       visibility: "audit",
@@ -284,6 +374,107 @@ describe("dispatcher API", () => {
       body: JSON.stringify({ result: { conclusion: "success", summary: "done" } })
     });
     expect(deprecatedComplete.status).toBe(410);
+  });
+
+  it("records duplicate source-event admission as an idempotent replay", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+
+    await app.request("/v1/runners", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runnerId: "runner_1", name: "Runner One" })
+    });
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        workspacePath: "/Users/test/demo",
+        defaultExecutor: "echo"
+      })
+    });
+
+    const first = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_dup_a", event: { ...validEvent, id: "evt_dup_a", sourceEventId: "comment_dup_a" } })
+    });
+    expect(first.status).toBe(201);
+
+    const replay = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_dup_b", event: { ...validEvent, id: "evt_dup_a", sourceEventId: "comment_dup_a" } })
+    });
+    expect(replay.status).toBe(200);
+    const replayJson = await replay.json();
+    expect(replayJson.idempotentReplay).toBe(true);
+    expect(replayJson.run.id).toBe("run_dup_a");
+
+    const eventsResponse = await app.request("/v1/runs/run_dup_a/events");
+    const { events } = await eventsResponse.json();
+    expect(events.map((event: { type: string }) => event.type)).toContain("admission.decided");
+    expect(events.map((event: { type: string }) => event.type)).toContain("run.create_idempotent_replay");
+  });
+
+  it("returns 404 when promoting a missing follow-up request", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+
+    const response = await app.request("/v1/follow-up-requests/missing/create-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_missing_follow_up" })
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "follow_up_request_not_found" });
+  });
+
+  it("returns 409 when promoting a follow-up request that is no longer queued", async () => {
+    const app = createDispatcherApp({ databasePath: ":memory:" });
+
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        workspacePath: "/Users/test/demo",
+        defaultExecutor: "echo"
+      })
+    });
+
+    await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_active_for_promote", event: { ...validEvent, id: "evt_active_for_promote", sourceEventId: "comment_active_for_promote" } })
+    });
+    await app.request("/v1/runners/runner_1/claim", { method: "POST" });
+    await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "follow_up_for_promote", event: { ...validEvent, id: "evt_follow_up_for_promote", sourceEventId: "comment_follow_up_for_promote" } })
+    });
+
+    const first = await app.request("/v1/follow-up-requests/follow_up_for_promote/create-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_promoted_once" })
+    });
+    expect(first.status).toBe(201);
+
+    const second = await app.request("/v1/follow-up-requests/follow_up_for_promote/create-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_promoted_twice" })
+    });
+    expect(second.status).toBe(409);
+    await expect(second.json()).resolves.toEqual({ error: "follow_up_request_not_queued" });
   });
 
   it("renders Slack callbacks with Slack mrkdwn and keeps progress audit-only", async () => {
@@ -381,6 +572,7 @@ describe("dispatcher API", () => {
     const eventsResponse = await app.request("/v1/runs/run_slack_1/events");
     const { events } = await eventsResponse.json();
     expect(events.map((event: { type: string }) => event.type)).toEqual([
+      "admission.decided",
       "run.created",
       "context_packet.generated",
       "callback.acknowledgement.queued",
@@ -1045,8 +1237,13 @@ describe("dispatcher API", () => {
       body: JSON.stringify({ runId: "run_unbound", event: validEvent })
     });
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({ error: "repo_not_bound" });
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      decision: {
+        action: "needs_human_decision",
+        reasonCode: "repo_not_bound"
+      }
+    });
   });
 
   it("rejects write-capable runs from actors outside the repo binding allowlist", async () => {
@@ -1079,8 +1276,51 @@ describe("dispatcher API", () => {
       })
     });
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({ error: "actor_not_allowed_for_write" });
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      decision: {
+        action: "needs_human_decision",
+        reasonCode: "actor_not_allowed_for_write"
+      }
+    });
+  });
+
+  it("can require a human decision through an agent access profile hook", async () => {
+    const app = createDispatcherApp({
+      databasePath: ":memory:",
+      agentAccessProfileCheck: async () => ({
+        allowed: false,
+        reason: "The configured agent access profile does not allow this run in the current container.",
+        reasonCode: "agent_access_profile_denied"
+      })
+    });
+
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1",
+        workspacePath: "/Users/test/demo",
+        defaultExecutor: "echo"
+      })
+    });
+
+    const response = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_access_denied", event: validEvent })
+    });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      decision: {
+        action: "needs_human_decision",
+        reasonCode: "agent_access_profile_denied"
+      }
+    });
   });
 
   it("accepts runner heartbeat for claimed runs", async () => {
@@ -1109,6 +1349,42 @@ describe("dispatcher API", () => {
     const eventsResponse = await app.request("/v1/runs/run_heartbeat/events");
     const { events } = await eventsResponse.json();
     expect(events.map((event: { type: string }) => event.type)).toContain("run.heartbeat");
+  });
+
+  it("returns needs_human_decision when the agent access profile hook denies the run", async () => {
+    const app = createDispatcherApp({
+      databasePath: ":memory:",
+      agentAccessProfileCheck: async () => ({
+        allowed: false,
+        reason: "access denied",
+        reasonCode: "agent_access_profile_denied"
+      })
+    });
+
+    await app.request("/v1/repo-bindings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "github",
+        owner: "acme",
+        repo: "demo",
+        runnerId: "runner_1"
+      })
+    });
+
+    const response = await app.request("/v1/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "run_access_denied", event: validEvent })
+    });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      decision: {
+        action: "needs_human_decision",
+        reasonCode: "agent_access_profile_denied"
+      }
+    });
   });
 
   it("stores and returns generic channel bindings", async () => {
