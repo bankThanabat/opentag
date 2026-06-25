@@ -94,6 +94,7 @@ try {
   const claimed = await client.claim({ runnerId: "runner_smoke" });
   assert(claimed?.run.id === "run_smoke_1", "runner should claim the smoke run");
   await client.complete({
+    runnerId: "runner_smoke",
     runId: "run_smoke_1",
     result: {
       conclusion: "needs_human",
