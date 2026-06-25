@@ -39,6 +39,16 @@ export const SlackChannelBindingConfigSchema = z.object({
   repo: z.string().min(1)
 });
 
+export const ChannelBindingConfigSchema = z.object({
+  provider: z.string().min(1),
+  accountId: z.string().min(1),
+  conversationId: z.string().min(1),
+  repoProvider: z.string().min(1).default("github"),
+  owner: z.string().min(1),
+  repo: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()).optional()
+});
+
 export const LarkChannelBindingConfigSchema = z.object({
   tenantKey: z.string().min(1),
   chatId: z.string().min(1),
@@ -51,6 +61,7 @@ export const OpenTagDaemonConfigSchema = z.object({
   runnerId: z.string().min(1).default("runner_local"),
   dispatcherUrl: z.string().url().default("http://localhost:3030"),
   repositories: z.array(RepositoryBindingConfigSchema).default([]),
+  channelBindings: z.array(ChannelBindingConfigSchema).optional(),
   slackChannels: z.array(SlackChannelBindingConfigSchema).optional(),
   larkChannels: z.array(LarkChannelBindingConfigSchema).optional(),
   claudeCode: ClaudeCodeExecutorConfigSchema.optional(),
@@ -63,6 +74,7 @@ export const OpenTagDaemonConfigSchema = z.object({
 });
 
 export type RepositoryBindingConfig = z.infer<typeof RepositoryBindingConfigSchema>;
+export type ChannelBindingConfig = z.infer<typeof ChannelBindingConfigSchema>;
 export type SlackChannelBindingConfig = z.infer<typeof SlackChannelBindingConfigSchema>;
 export type LarkChannelBindingConfig = z.infer<typeof LarkChannelBindingConfigSchema>;
 export type OpenTagDaemonConfig = z.infer<typeof OpenTagDaemonConfigSchema>;

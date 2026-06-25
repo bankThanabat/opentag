@@ -1,5 +1,12 @@
 import { serve } from "@hono/node-server";
-import { createCompositeCallbackSink, createDispatcherApp, createGitHubCallbackSink, createLarkCallbackSink, createSlackCallbackSink } from "@opentag/dispatcher";
+import {
+  createCompositeCallbackSink,
+  createDispatcherApp,
+  createGitHubCallbackSink,
+  createLarkCallbackSink,
+  createSlackCallbackSink,
+  createTelegramCallbackSink
+} from "@opentag/dispatcher";
 
 const port = Number(process.env.PORT ?? "3030");
 const databasePath = process.env.OPENTAG_DATABASE_PATH ?? "opentag.db";
@@ -22,6 +29,24 @@ function slackBotTokensByAgentIdFromEnv(): Record<string, string> | undefined {
 
 const slackBotTokensByAgentId = slackBotTokensByAgentIdFromEnv();
 
+function telegramBotTokensByAgentIdFromEnv(): Record<string, string> | undefined {
+  const raw = process.env.OPENTAG_TELEGRAM_BOT_TOKENS_JSON;
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Value is not a JSON object");
+    }
+    return Object.keys(parsed).length > 0 ? (parsed as Record<string, string>) : undefined;
+  } catch (error) {
+    throw new Error(
+      `Failed to parse OPENTAG_TELEGRAM_BOT_TOKENS_JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+const telegramBotTokensByAgentId = telegramBotTokensByAgentIdFromEnv();
+
 serve({
   fetch: createDispatcherApp({
     databasePath,
@@ -39,6 +64,10 @@ serve({
         ...(process.env.LARK_APP_ID ? { appId: process.env.LARK_APP_ID } : {}),
         ...(process.env.LARK_APP_SECRET ? { appSecret: process.env.LARK_APP_SECRET } : {}),
         ...(process.env.LARK_DOMAIN === "feishu" ? { domain: "feishu" as const } : {})
+      }),
+      createTelegramCallbackSink({
+        ...(process.env.OPENTAG_TELEGRAM_BOT_TOKEN ? { botToken: process.env.OPENTAG_TELEGRAM_BOT_TOKEN } : {}),
+        ...(telegramBotTokensByAgentId ? { botTokensByAgentId: telegramBotTokensByAgentId } : {})
       })
     ])
   }).fetch,

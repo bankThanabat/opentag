@@ -2,6 +2,7 @@ import type { OpenTagRunResult } from "@opentag/core";
 import { renderAcknowledgement, renderFinalResult, renderProgress } from "@opentag/github";
 import { renderLarkAcknowledgement, renderLarkFinalResult } from "@opentag/lark";
 import { createSlackFinalResultBlocks, renderSlackAcknowledgement, renderSlackFinalResult, type SlackBlock } from "@opentag/slack";
+import { renderTelegramAcknowledgement, renderTelegramFinalResult, renderTelegramProgress } from "@opentag/telegram";
 import type { CallbackMessage } from "./server.js";
 
 export type CallbackProvider = CallbackMessage["provider"];
@@ -31,10 +32,16 @@ export function createDefaultCallbackPresentation(): CallbackPresentation {
       if (input.provider === "lark") {
         return renderLarkAcknowledgement(input.runId);
       }
+      if (input.provider === "telegram") {
+        return renderTelegramAcknowledgement(input.runId);
+      }
       return renderAcknowledgement(input.runId);
     },
 
     progress(input) {
+      if (input.provider === "telegram") {
+        return renderTelegramProgress(input.message);
+      }
       return renderProgress({ runId: input.runId, message: input.message });
     },
 
@@ -47,6 +54,9 @@ export function createDefaultCallbackPresentation(): CallbackPresentation {
       }
       if (input.provider === "lark") {
         return { body: renderLarkFinalResult(input.result) };
+      }
+      if (input.provider === "telegram") {
+        return { body: renderTelegramFinalResult(input.result) };
       }
       return { body: renderFinalResult(input.result) };
     }
