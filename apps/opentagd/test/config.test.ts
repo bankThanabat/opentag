@@ -89,6 +89,32 @@ describe("opentagd config", () => {
     });
   });
 
+  it("propagates OPENTAG_SLACK_REPO_PROVIDER into env-derived repository and Slack bindings", () => {
+    delete process.env.OPENTAG_CONFIG_PATH;
+    process.env.OPENTAG_REPO_OWNER = "acme";
+    process.env.OPENTAG_REPO_NAME = "demo";
+    process.env.OPENTAG_WORKSPACE_PATH = "/tmp/demo";
+    process.env.OPENTAG_SLACK_TEAM_ID = "T123";
+    process.env.OPENTAG_SLACK_CHANNEL_ID = "C123";
+    process.env.OPENTAG_SLACK_REPO_PROVIDER = "gitlab";
+
+    const config = loadConfigFromEnv();
+
+    expect(config.repositories[0]).toMatchObject({
+      provider: "gitlab",
+      owner: "acme",
+      repo: "demo",
+      checkoutPath: "/tmp/demo"
+    });
+    expect(config.slackChannels?.[0]).toMatchObject({
+      teamId: "T123",
+      channelId: "C123",
+      repoProvider: "gitlab",
+      owner: "acme",
+      repo: "demo"
+    });
+  });
+
   it("formats zod config errors into a readable message", () => {
     const error = (() => {
       try {

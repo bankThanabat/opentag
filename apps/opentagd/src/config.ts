@@ -142,12 +142,13 @@ export function loadConfigFromEnv(): OpenTagDaemonConfig {
   const owner = process.env.OPENTAG_REPO_OWNER;
   const repo = process.env.OPENTAG_REPO_NAME;
   const checkoutPath = process.env.OPENTAG_WORKSPACE_PATH;
+  const repositoryProvider = process.env.OPENTAG_SLACK_REPO_PROVIDER ?? "github";
   const claudePermissionMode = claudePermissionModeFromEnv(process.env.OPENTAG_CLAUDE_PERMISSION_MODE);
   const repositories =
     owner && repo && checkoutPath
       ? [
           {
-            provider: "github",
+            provider: repositoryProvider,
             owner,
             repo,
             checkoutPath,
@@ -170,7 +171,7 @@ export function loadConfigFromEnv(): OpenTagDaemonConfig {
             {
               teamId: process.env.OPENTAG_SLACK_TEAM_ID,
               channelId: process.env.OPENTAG_SLACK_CHANNEL_ID,
-              repoProvider: process.env.OPENTAG_SLACK_REPO_PROVIDER ?? "github",
+              repoProvider: repositoryProvider,
               owner,
               repo
             }
