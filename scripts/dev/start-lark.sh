@@ -91,14 +91,17 @@ absolute_path() {
   node -e 'const path = require("node:path"); console.log(path.resolve(process.argv[1]));' "$raw"
 }
 
-local_project_name() {
+canonical_path() {
+  node -e 'const fs = require("node:fs"); console.log(fs.realpathSync.native(process.argv[1]));' "$1"
+}
+
+local_project_ref() {
   local checkout_path="$1"
-  node -e '
-const path = require("node:path");
-const rawName = path.basename(process.argv[1]).trim() || "project";
-const safeName = rawName.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "project";
-process.stdout.write(safeName);
-' "$checkout_path"
+  (
+    cd "$ROOT_DIR/apps/lark-events"
+    NODE_OPTIONS='--conditions=development' node_modules/.bin/tsx \
+      ../../scripts/dev/print-local-project-target-ref.ts "$checkout_path"
+  )
 }
 
 port_is_in_use() {
@@ -353,11 +356,12 @@ if ! workspace_dependencies_installed; then
 fi
 
 DEFAULT_CHECKOUT="$(git -C "$ROOT_DIR" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$ROOT_DIR")"
-CHECKOUT_INPUT="${OPENTAG_WORKSPACE_PATH:-$(read_with_default "Local project path for this agent" "$DEFAULT_CHECKOUT")}"
+CHECKOUT_INPUT="${OPENTAG_WORKSPACE_PATH:-$(read_with_default "Local path for this Project Target" "$DEFAULT_CHECKOUT")}"
 CHECKOUT_PATH="$(absolute_path "$CHECKOUT_INPUT")"
 
-[[ -d "$CHECKOUT_PATH" ]] || fail "Project path does not exist: $CHECKOUT_PATH"
-git -C "$CHECKOUT_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "Project path must be a git checkout: $CHECKOUT_PATH"
+[[ -d "$CHECKOUT_PATH" ]] || fail "Project Target path does not exist: $CHECKOUT_PATH"
+git -C "$CHECKOUT_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "Project Target path must be a git checkout: $CHECKOUT_PATH"
+CHECKOUT_PATH="$(canonical_path "$CHECKOUT_PATH")"
 
 if [[ -n "${OPENTAG_REPO_OWNER:-}" && -n "${OPENTAG_REPO_NAME:-}" ]]; then
   REPO_PROVIDER="${OPENTAG_REPO_PROVIDER:-github}"
@@ -365,9 +369,11 @@ if [[ -n "${OPENTAG_REPO_OWNER:-}" && -n "${OPENTAG_REPO_NAME:-}" ]]; then
   REPO_NAME="$OPENTAG_REPO_NAME"
   log "Advanced repository target enabled for PR-capable workflows."
 else
-  REPO_PROVIDER="local"
-  REPO_OWNER="local"
-  REPO_NAME="$(local_project_name "$CHECKOUT_PATH")"
+  PROJECT_TARGET_REF="$(local_project_ref "$CHECKOUT_PATH")"
+  REPO_PROVIDER="${PROJECT_TARGET_REF%%:*}"
+  PROJECT_TARGET_PATH="${PROJECT_TARGET_REF#*:}"
+  REPO_OWNER="${PROJECT_TARGET_PATH%%/*}"
+  REPO_NAME="${PROJECT_TARGET_PATH#*/}"
 fi
 
 BASE_BRANCH="${OPENTAG_BASE_BRANCH:-$(git -C "$CHECKOUT_PATH" branch --show-current 2>/dev/null || true)}"
@@ -492,8 +498,8 @@ write_config
 
 log
 log "Starting OpenTag for Lark"
-log "- Project: $REPO_NAME"
-log "- Path: $CHECKOUT_PATH"
+log "- Project Target: $REPO_NAME"
+log "- Project Target path: $CHECKOUT_PATH"
 log "- Executor: $EXECUTOR"
 log "- Dispatcher: $DISPATCHER_URL"
 log "- Config: $CONFIG_PATH"
@@ -517,7 +523,7 @@ wait_for_dispatcher "$DISPATCHER_URL"
 
 log "Registering local runner and binding the selected project..."
 run_opentagd register-runner
-run_opentagd bind-repos
+run_opentagd bind-project-targets
 
 log "Starting local daemon..."
 (
@@ -562,7 +568,7 @@ else
   log "Group chat needs LARK_BOT_OPEN_ID. Direct chat is ready now."
   log
 fi
-log "This script auto-connects the first Lark chat that messages the bot to this local project."
+log "This script auto-connects the first Lark chat that messages the bot to this Project Target."
 log
 log "Expected AHA moment:"
 log "1. This terminal shows the local daemon running the executor."
