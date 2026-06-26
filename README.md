@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/opentag-mark.png" alt="OpenTag logo" width="160" />
+</p>
+
 # OpenTag
 
 **Open-source agent mentions for the apps where work happens.**
