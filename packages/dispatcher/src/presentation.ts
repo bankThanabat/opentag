@@ -13,6 +13,7 @@ export type PresentedCallbackBody = {
 };
 
 export type CallbackPresentation = {
+  shouldDeliverAcknowledgement(provider: CallbackProvider): boolean;
   shouldDeliverProgress(provider: CallbackProvider): boolean;
   acknowledgement(input: { provider: CallbackProvider; runId: string }): string;
   progress(input: { provider: CallbackProvider; runId: string; message: string }): string;
@@ -21,8 +22,12 @@ export type CallbackPresentation = {
 
 export function createDefaultCallbackPresentation(): CallbackPresentation {
   return {
+    shouldDeliverAcknowledgement(provider) {
+      return provider !== "lark";
+    },
+
     shouldDeliverProgress(provider) {
-      return provider !== "slack";
+      return provider !== "slack" && provider !== "lark";
     },
 
     acknowledgement(input) {

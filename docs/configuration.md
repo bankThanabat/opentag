@@ -279,6 +279,14 @@ Slack threads.
 `apps/lark-events` opens a Lark/Feishu WebSocket long connection (no public
 tunnel) and creates OpenTag runs from `im.message.receive_v1` events.
 
+For the shortest local setup, run `scripts/dev/start-lark.sh` and choose the QR
+scan path. It creates a Personal Agent app, connects the chat to a local project
+target, saves the Personal Agent credentials to `.opentag/lark/lark.local.json`,
+and exports these values for the local dispatcher and Lark ingress. Rerunning
+the script reuses that saved app unless `OPENTAG_LARK_APP_SETUP=scan` or
+`OPENTAG_LARK_APP_SETUP=manual` is set explicitly. Use the environment variables
+below for manual or hosted setups.
+
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `LARK_APP_ID` | yes | Lark app id used for the long connection |
@@ -288,17 +296,19 @@ tunnel) and creates OpenTag runs from `im.message.receive_v1` events.
 | `OPENTAG_DISPATCHER_TOKEN` | when dispatcher is paired | Bearer token for dispatcher `/v1/*` |
 | `LARK_BOT_OPEN_ID` | for group chats | Bot open id; group messages must @-mention it. Direct p2p chats do not need it |
 | `OPENTAG_LARK_AGENT_ID` | no | Agent id for the ingress. Defaults to `opentag` |
+| `OPENTAG_LARK_DEFAULT_REPO` | no | Optional internal project target formatted as `owner/repo` or `provider:owner/repo`; unbound chats auto-connect to it before creating the first run |
 
 Set `LARK_APP_ID` / `LARK_APP_SECRET` / `LARK_DOMAIN` on the dispatcher too, so
 the Lark callback sink can post replies. Bind a chat to a repo with
 `opentagd bind-lark-channels` (using `larkChannels`) or `POST /v1/channel-bindings`.
 
-Each chat is bound independently (one `tenantKey/chatId` → one repo), so one bot
-can serve several chats that each target a different repo. Users can also bind a
-chat from inside Lark without the CLI: @-mention the bot with `/bind <owner>/<repo>`
-(e.g. `/bind amplifthq/opentag`, or `/bind github:amplifthq/opentag`). The bot
-confirms in-thread, and an @-mention in an unbound chat replies with the same
-hint. The target repo must already be registered on a runner (`opentagd bind-repos`).
+Each chat is bound independently (one `tenantKey/chatId` to one project target),
+so one bot can serve several chats that each target a different local project.
+Manual and hosted setups can still bind a chat from inside Lark with
+`/bind <owner>/<repo>` or `/bind <provider>:<owner>/<repo>`. Treat that as an
+advanced route; the local start script auto-connects the first chat to the
+selected local project. The target must already be registered on a runner
+(`opentagd bind-repos`).
 
 ## Telegram Ingress Environment
 

@@ -42,6 +42,7 @@ const binding: LarkChannelBinding = { tenantKey: "tk_123", chatId: "oc_chat", ow
 function makeHandler(opts?: {
   withBotOpenId?: boolean;
   binding?: LarkChannelBinding | null;
+  defaultRepoBinding?: { repoProvider: string; owner: string; repo: string };
   createRun?: ReturnType<typeof vi.fn>;
   bindChannel?: ReturnType<typeof vi.fn>;
   reply?: ReturnType<typeof vi.fn>;
@@ -52,6 +53,7 @@ function makeHandler(opts?: {
   const handler = createLarkMessageHandler({
     agentId: "opentag",
     ...(opts?.withBotOpenId === false ? {} : { botOpenId: "ou_bot" }),
+    ...(opts?.defaultRepoBinding ? { defaultRepoBinding: opts.defaultRepoBinding } : {}),
     resolveChannelBinding: async () => (opts && "binding" in opts ? (opts.binding ?? null) : binding),
     createRun,
     bindChannel,
@@ -133,6 +135,37 @@ describe("createLarkMessageHandler", () => {
     expect(outcome.tenantKey).toBe("tk_123");
     expect(outcome.chatId).toBe("oc_chat");
     expect(reply).toHaveBeenCalledTimes(1);
+    expect(createRun).not.toHaveBeenCalled();
+  });
+
+  it("auto-binds an unbound chat to the configured default repo and creates a run", async () => {
+    const { handler, bindChannel, reply, createRun } = makeHandler({
+      binding: null,
+      defaultRepoBinding: { repoProvider: "github", owner: "amplifthq", repo: "opentag" }
+    });
+    const outcome = await handler(messageEvent({ text: "@_user_1 investigate this setup" }));
+    expect(outcome.status).toBe("created");
+    expect(bindChannel).toHaveBeenCalledWith({
+      tenantKey: "tk_123",
+      chatId: "oc_chat",
+      repoProvider: "github",
+      owner: "amplifthq",
+      repo: "opentag"
+    });
+    expect(reply).not.toHaveBeenCalled();
+    const event = createRun.mock.calls[0]?.[0];
+    expect(event?.metadata).toMatchObject({ repoProvider: "github", owner: "amplifthq", repo: "opentag" });
+  });
+
+  it("does not auto-bind an empty @mention", async () => {
+    const { handler, bindChannel, reply, createRun } = makeHandler({
+      binding: null,
+      defaultRepoBinding: { repoProvider: "github", owner: "amplifthq", repo: "opentag" }
+    });
+    const outcome = await handler(messageEvent({ text: "@_user_1   " }));
+    expect(outcome.status).toBe("ignored_empty_command");
+    expect(bindChannel).not.toHaveBeenCalled();
+    expect(reply).not.toHaveBeenCalled();
     expect(createRun).not.toHaveBeenCalled();
   });
 
