@@ -19,11 +19,13 @@
 
 ![OpenTag workflow: work app mentions routed to approved runners](./assets/readme-hero.png)
 
-Claude Tag made the interface obvious: mention an agent where work already happens and get the result back in the thread. OpenTag is the open version: GitHub and Slack adapters today, a shared adapter model for more work apps, a thin dispatcher, and local or hosted runners that execute Claude Code, Codex, or your own agent with explicit bindings and audit trails.
+Claude Tag made the interface obvious: mention an agent where work already happens and get the result back in the thread. OpenTag is the open version: a work thread mention becomes a scoped run, an approved local or hosted runner executes Claude Code, Codex, or your own agent, and the result returns to the source thread with an audit trail.
 
 OpenTag is not another AI workspace. It brings agents to the work item thread you already use.
 
 > OpenTag is not affiliated with Anthropic. It is an open implementation of the agent-mention workflow that Claude Tag made obvious.
+
+![OpenTag GitHub-to-PR golden path](./assets/opentag-github-to-pr.gif)
 
 Real smoke tests have validated:
 
@@ -44,41 +46,56 @@ pnpm build
 
 For local app and runner configuration, copy `.env.example` to `.env` and replace the placeholder values.
 
-The smoke tests start an in-process dispatcher with a temporary SQLite database and exercise the protocol chain through the client SDK. For a full local runner loop, start with [examples/github-to-echo](examples/github-to-echo/README.md).
+The smoke tests start an in-process dispatcher with a temporary SQLite database and exercise the protocol chain through the client SDK. For a full local runner loop, start with [examples/github-to-echo](examples/github-to-echo/README.md). For the product demo path, use [examples/github-to-pr](examples/github-to-pr/README.md).
 
 ## Why OpenTag
 
 - **Bring agents to work threads** - mention an approved agent from GitHub, Slack, or future work app adapters instead of copying context into a separate AI chat workspace.
 - **Control where execution happens** - keep coding work local with `opentagd`, or use hosted/custom runners that implement the same claim and callback contracts.
-- **Use any approved executor** - built-in adapters cover `echo`, `claude-code`, and `codex`; custom runners can implement the same contracts.
-- **Stay quiet by default** - human threads get useful acknowledgements and final results, while detailed progress stays in audit events and metrics.
-- **Make control explicit** - repository bindings, leases, context packets, policies, approvals, and apply plans are first-class protocol objects.
+- **Use any approved executor** - built-in adapters cover `echo`, `claude-code`, and `codex`; custom runners can implement the same contract.
+- **Return outcomes, not noise** - human threads get useful acknowledgements and final results while detailed progress stays in audit events and metrics.
+- **Govern external writes** - repository bindings, permission scopes, context packets, and audit trails make agent authority explicit.
 
 ## How It Works
 
 ```mermaid
 flowchart LR
-    A["Work app mention<br/>GitHub, Slack, future adapters"] --> B["OpenTag event"]
+    A["Work app mention<br/>GitHub, Slack, future adapters"] --> B["Scoped work request"]
     B --> C["Thin dispatcher<br/>leases, audit, callbacks"]
     C --> D["Approved runner<br/>local or hosted"]
     D --> E["Executor<br/>Claude Code, Codex, custom"]
     E --> F["Source thread<br/>comment, PR, metrics"]
 ```
 
-1. Ingress adapters normalize platform comments or app mentions into one `OpenTagEvent`.
+1. Ingress adapters normalize platform comments or app mentions into one work request.
 2. The dispatcher validates scope, persists the run, manages leases, and records audit events.
 3. A local or hosted runner claims only work it is explicitly bound to handle.
 4. The executor does the work in the mapped checkout and returns structured results.
 5. Callback adapters update the source thread without flooding it.
 
-## What Works Today
+## Why Teams Can Trust the Loop
 
-- **GitHub and Slack ingress** for issue comments, PR review comments, and app mentions.
-- **Local daemon execution** with polling, heartbeats, lease-based claiming, and dirty-worktree protection for coding executors.
-- **Executor adapters** for smoke tests, Claude Code (`claude --print`), Codex (`codex exec`), and custom runners.
-- **Dispatcher persistence** for runs, audit events, proposals, approvals, apply plans, policy, mappings, lineage, and metrics.
-- **Quiet callbacks** that update GitHub run comments in place and keep routine Slack progress audit-only.
-- **Protocol runtime** for work items, conversation anchors, context packets, suggested changes, approvals, apply plans, and action hints.
+- **Bounded claims** - runners claim only repositories or channels explicitly bound to them.
+- **Local-first execution** - repo access, build tools, credentials, and private context can stay in the user's own checkout.
+- **Branch isolation** - coding executors work on an `opentag/<runId>` branch or worktree instead of writing directly to the target branch.
+- **Dirty-worktree protection** - Codex and Claude Code executors refuse to run against unsafe local checkout state.
+- **Explicit external writes** - pull requests, status changes, labels, and other system mutations require explicit capability or configuration.
+- **Quiet callbacks** - source threads receive acknowledgements, blockers, and final results; routine progress stays audit-only by default.
+- **Auditable context** - the Work Thread, Context Packet, and Audit Trail preserve what was asked, what was included, who ran it, and what happened next.
+
+## Works Today / Experimental / Future
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| GitHub | Works today | Issue comments, PR review comments, callbacks, and pull request creation from local daemon runs when configured |
+| Slack | Works today | App mentions, channel-to-repo bindings, thread callbacks, and audit-only routine progress |
+| Local daemon | Works today | Polling, heartbeats, lease-based claiming, repository bindings, and dirty-worktree protection |
+| Executors | Works today | `echo`, Claude Code (`claude --print`), Codex (`codex exec`), and custom executor contracts |
+| Protocol runtime | Works today | Work Threads, Context Packets, Audit Trails, run admission, quiet callbacks, and metrics |
+| Telegram and Lark | Experimental adapters | Normalizers, ingress apps, and callback helpers are present; treat them as adapter-expansion surfaces rather than the main v0 golden path |
+| Hosted multi-tenant control plane | Future hardening | The dispatcher is intentionally thin today; production multi-tenant hosting needs more operational hardening |
+
+For teams building governed workflows, the deeper protocol vocabulary lives in [Agent Work Protocol](docs/agent-work-protocol.md): capability contracts, policy resolution, suggested changes, approvals, apply plans, and lineage.
 
 ## Packages
 
@@ -100,9 +117,10 @@ pnpm add @opentag/core @opentag/client @opentag/dispatcher @opentag/github @open
 
 Runnable apps live in `apps/dispatcher`, `apps/opentagd`, `apps/github-probot`, and `apps/slack-events`.
 
-## Examples And Guides
+## Examples and Guides
 
 - [GitHub to echo](examples/github-to-echo/README.md) - manual end-to-end GitHub-shaped local runner loop.
+- [GitHub to PR](examples/github-to-pr/README.md) - product demo path from GitHub issue mention to local execution, pull request, callback, and audit evidence.
 - [Embedded dispatcher](examples/embedded-dispatcher/README.md) - host OpenTag inside another Node service.
 - [Custom runner](examples/custom-runner/README.md) - build a third-party runner with `@opentag/client` and `@opentag/runner`.
 - [Configuration](docs/configuration.md) - map dispatcher, daemon, ingress, callback, and runner settings.
