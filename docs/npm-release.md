@@ -45,20 +45,22 @@ Log in to npm first:
 npm whoami
 ```
 
-Then publish each package from the repo root:
+Then publish from the repo root:
 
 ```bash
-corepack pnpm --dir packages/core publish --access public
-corepack pnpm --dir packages/client publish --access public
-corepack pnpm --dir packages/telegram publish --access public
-corepack pnpm --dir packages/runner publish --access public
-corepack pnpm --dir packages/store publish --access public
-corepack pnpm --dir packages/github publish --access public
-corepack pnpm --dir packages/lark publish --access public
-corepack pnpm --dir packages/slack publish --access public
-corepack pnpm --dir packages/dispatcher publish --access public
-corepack pnpm --dir packages/local-runtime publish --access public
-corepack pnpm --dir packages/cli publish --access public
+corepack pnpm release:publish
+```
+
+For a dry run:
+
+```bash
+corepack pnpm release:publish -- --dry-run
+```
+
+If npm asks for a two-factor one-time password, rerun with:
+
+```bash
+corepack pnpm release:publish -- --otp 123456
 ```
 
 ## User install check
