@@ -15,8 +15,8 @@ OpenTag has five runtime surfaces today:
 | --- | --- | --- |
 | Dispatcher | `apps/dispatcher` | Run storage, leases, callbacks, pairing token checks |
 | Local daemon | `apps/opentagd` | Runner identity, Project Target bindings, local checkout paths, executor settings |
-| GitHub ingress | `apps/github-probot` | GitHub App webhooks and GitHub event normalization |
-| Slack ingress | `apps/slack-events` | Slack Events API verification and Slack event normalization |
+| GitHub ingress | `@opentag/cli` / `apps/github-probot` | Repository webhooks or GitHub App webhooks and GitHub event normalization |
+| Slack ingress | `@opentag/cli` / `apps/slack-events` | Slack Socket Mode or Events API transport and Slack event normalization |
 | Telegram ingress | `apps/telegram-events` | Telegram webhook ingestion and Telegram event normalization |
 
 Keep these boundaries separate. Ingress apps should know how to receive platform
@@ -147,7 +147,7 @@ Use daemon security settings to keep executor runs constrained:
 | `larkChannels` | none | Lark bindings that map `tenantKey/chatId` into the generic channel binding table |
 | `claudeCode` | none | Claude Code executor settings |
 | `security` | none | Runner security policy |
-| `githubToken` | none | Optional token for PR creation from daemon-produced branches |
+| `githubToken` | none | GitHub token for callback comments, dispatcher GitHub apply helpers, and optional legacy PR creation |
 | `preparePullRequestBranch` | `false` | Commits and pushes executor run branches so a later source-thread `apply 1` can create the PR through an ApplyPlan |
 | `allowAutoCreatePullRequest` | `false` | Legacy mode that creates a PR immediately when executor results include changes |
 | `pollIntervalMs` | `5000` | Poll interval for `serve` |
@@ -198,7 +198,7 @@ for repeatable setups.
 | `OPENTAG_ALLOWED_WORKSPACE_ROOT` | none | Restricts allowed checkout paths |
 | `OPENTAG_ALLOW_UNSAFE_PROMPTS` | `false` | Allows prompts normally rejected by runner security |
 | `OPENTAG_EXTRA_SAFE_ENV` | none | Comma-separated env names preserved for executor processes |
-| `OPENTAG_GITHUB_TOKEN` | none | Optional GitHub token for PR creation |
+| `OPENTAG_GITHUB_TOKEN` | none | GitHub token for callback comments, dispatcher GitHub apply helpers, and optional legacy PR creation |
 | `OPENTAG_PREPARE_PR_BRANCH` | `false` | Pushes executor run branches for thread-native PR creation after approval |
 | `OPENTAG_ALLOW_AUTO_CREATE_PR` | `false` | Allows legacy immediate daemon PR creation |
 | `OPENTAG_PAIRING_TOKEN` | none | Shared dispatcher token |
@@ -228,14 +228,31 @@ If `OPENTAG_PAIRING_TOKEN` is set on the dispatcher, use the same value as:
 
 ## GitHub Ingress Environment
 
-`apps/github-probot` uses Probot for GitHub App webhooks.
+`opentag start` uses the publishable `@opentag/github` repository-webhook
+ingress. This is the CLI default. GitHub must send webhooks to a public URL
+that forwards to the local listener, usually:
+
+```text
+https://<your-tunnel-host>/github/webhooks
+```
+
+The CLI stores the repository webhook secret in `platforms.github.webhookSecret`.
+`opentag setup` writes the CLI local webhook port to `platforms.github.port`;
+new CLI configs default to `3050` to avoid common frontend dev-server port
+collisions.
+It verifies `x-hub-signature-256` and handles these GitHub events:
+
+- `issue_comment`
+- `pull_request_review_comment`
+
+`apps/github-probot` is the advanced GitHub App ingress and uses Probot.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `APP_ID` | yes | GitHub App ID expected by Probot |
 | `WEBHOOK_SECRET` | yes | GitHub App webhook secret |
 | `PRIVATE_KEY_PATH` | yes | Path to GitHub App private key |
-| `PORT` | no | Usually `3000` in local scripts |
+| `PORT` | no | Probot app port; older local scripts usually use `3000`. CLI configs use `platforms.github.port` instead |
 | `WEBHOOK_PATH` | no | Usually `/github/webhooks` |
 | `OPENTAG_DISPATCHER_URL` | yes for real dispatch | Dispatcher URL. If omitted, the app logs and does not dispatch the run |
 | `OPENTAG_DISPATCHER_TOKEN` | when dispatcher is paired | Bearer token for dispatcher `/v1/*` |
@@ -246,7 +263,14 @@ on the dispatcher. That avoids duplicate acknowledgement comments.
 
 ## Slack Ingress Environment
 
-`apps/slack-events` verifies Slack Events API requests and creates OpenTag runs.
+`opentag start` supports two Slack transports:
+
+- Socket Mode, recommended for local CLI use. It uses a Slack App-Level Token and
+  does not need a public URL.
+- Events API, intended for hosted OpenTag or advanced local tunnel testing. It
+  verifies signed Slack HTTP requests on `/slack/events`.
+
+The legacy `apps/slack-events` process is still an Events API ingress only.
 
 | Variable | Required | Notes |
 | --- | --- | --- |

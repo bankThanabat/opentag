@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.68.0",
+    "@opentag/client": "workspace:*",
     "@opentag/core": "workspace:*"
   },
   "devDependencies": {

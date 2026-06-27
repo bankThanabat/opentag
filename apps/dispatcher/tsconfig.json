@@ -6,6 +6,7 @@
   },
   "include": ["src/**/*.ts"],
   "references": [
-    { "path": "../../packages/dispatcher" }
+    { "path": "../../packages/dispatcher" },
+    { "path": "../../packages/local-runtime" }
   ]
 }

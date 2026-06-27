@@ -32,9 +32,14 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@opentag/core": "workspace:*"
+    "@hono/node-server": "^1.13.7",
+    "@opentag/client": "workspace:*",
+    "@opentag/core": "workspace:*",
+    "hono": "^4.6.15",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
   }
