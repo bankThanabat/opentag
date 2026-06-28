@@ -21,6 +21,20 @@
     <symbol id="code-icon" viewBox="0 0 64 58">
       <path d="M24 18L12 29l12 11M40 18l12 11-12 11M36 14L28 44" fill="none" stroke="#171717" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
     </symbol>
+    <symbol id="codex-logo" viewBox="0 0 24 24">
+      <path fill="#171717" fill-rule="evenodd" d="M8.086.457a6.105 6.105 0 0 1 3.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 0 0 .107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 0 1-.18 1.631.167.167 0 0 0 .04.155 5.982 5.982 0 0 1 1.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 0 1-2.934 1.851.162.162 0 0 0-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 0 0-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 0 1-2.595-.622 6.058 6.058 0 0 1-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 0 1-.495-1.283 6.11 6.11 0 0 1-.017-3.064.166.166 0 0 0 .008-.074.115.115 0 0 0-.037-.064 5.958 5.958 0 0 1-1.38-2.202 5.196 5.196 0 0 1-.333-1.589 6.915 6.915 0 0 1 .188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 0 0 .087-.087A6.016 6.016 0 0 1 5.635 2.31C6.315 1.464 7.132.846 8.086.457Zm-.804 7.85a.848.848 0 0 0-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 0 0 1.46.864l1.94-3.272a.849.849 0 0 0 .007-.854l-1.94-3.393Zm5.446 6.24a.849.849 0 0 0 0 1.695h4.848a.849.849 0 0 0 0-1.696h-4.848Z" clip-rule="evenodd"/>
+    </symbol>
+    <symbol id="claude-code-logo" viewBox="0 0 24 24">
+      <path fill="#171717" d="M21 10.5h3v3h-3v3h-1.5v3H18v-3h-1.5v3H15v-3H9v3H7.5v-3H6v3H4.5v-3H3v-3H0v-3h3v-6h18Zm-15 0h1.5v-3H6Zm10.5 0H18v-3h-1.5z"/>
+    </symbol>
+    <symbol id="lock-feature-icon" viewBox="0 0 24 24">
+      <path d="M7.5 10.5V8a4.5 4.5 0 0 1 9 0v2.5" fill="none" stroke="#171717" stroke-width="2.2" stroke-linecap="round"/>
+      <rect x="6" y="10.5" width="12" height="9" rx="2.2" fill="none" stroke="#171717" stroke-width="2.2"/>
+      <path d="M12 14v2" fill="none" stroke="#171717" stroke-width="2.2" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="bolt-feature-icon" viewBox="0 0 24 24">
+      <path d="M13 2.5 5.8 13h6.1l-1 8.5 7.3-11.8h-6.1L13 2.5Z" fill="none" stroke="#171717" stroke-width="2.2" stroke-linejoin="round"/>
+    </symbol>
     <style>
       .bg { fill: #ffffff; }
       .surface { fill: #fafafa; stroke: #e6e6e6; stroke-width: 2; }
@@ -36,6 +50,7 @@
       text { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
       .title { font-size: 34px; font-weight: 650; letter-spacing: 0; }
       .body { font-size: 26px; font-weight: 450; letter-spacing: 0; }
+      .button-label { font-size: 24px; font-weight: 500; letter-spacing: 0; }
       .small { font-size: 20px; font-weight: 500; letter-spacing: 0; }
     </style>
   </defs>
@@ -67,7 +82,7 @@
     <g transform="translate(64 458)">
       <rect class="surface" width="474" height="178" rx="16"/>
       <rect class="soft" x="30" y="28" width="64" height="58" rx="12"/>
-      <use href="#lark-logo" x="37" y="42" width="50" height="40"/>
+      <use href="#lark-logo" x="38" y="37" width="42" height="34"/>
       <text class="ink title" x="124" y="71">Lark / Feishu</text>
       <rect class="soft" x="118" y="98" width="374" height="64" rx="12"/>
       <text class="body accent" x="156" y="139" font-weight="650">@opentag</text>
@@ -111,11 +126,13 @@
     <path class="blue" d="M104 287h100M220 287h122" stroke-width="6" stroke-linecap="round"/>
     <g transform="translate(34 360)">
       <rect class="soft" width="162" height="62" rx="14"/>
-      <text class="body ink" x="44" y="40">Codex</text>
+      <use href="#codex-logo" x="29" y="18" width="26" height="26"/>
+      <text class="button-label ink" x="66" y="39">Codex</text>
     </g>
     <g transform="translate(220 360)">
       <rect class="soft" width="224" height="62" rx="14"/>
-      <text class="body ink" x="43" y="40">Claude Code</text>
+      <use href="#claude-code-logo" x="29" y="19" width="26" height="26"/>
+      <text class="button-label ink" x="66" y="39">Claude Code</text>
     </g>
   </g>
 
@@ -136,18 +153,16 @@
     <text class="muted body" x="468" y="40">Route @mentions from collaboration platforms</text>
     <text class="muted body" x="468" y="76">to a local coding agent.</text>
     <g transform="translate(1088 12)">
-      <circle cx="28" cy="40" r="28" fill="#fafafa" stroke="#e6e6e6" stroke-width="2"/>
-      <path d="M18 34v-7c0-6 4-10 10-10s10 4 10 10v7" fill="none" stroke="#171717" stroke-width="4" stroke-linecap="round"/>
-      <rect x="15" y="32" width="26" height="22" rx="6" fill="none" stroke="#171717" stroke-width="4"/>
-      <path d="M28 41v6" fill="none" stroke="#171717" stroke-width="4" stroke-linecap="round"/>
-      <text class="small ink" x="78" y="33">Local &amp;</text>
-      <text class="small ink" x="78" y="59">private</text>
+      <circle cx="28" cy="40" r="22" fill="#fafafa" stroke="#e6e6e6" stroke-width="2"/>
+      <use href="#lock-feature-icon" x="16" y="28" width="24" height="24"/>
+      <text class="small ink" x="68" y="33">Local &amp;</text>
+      <text class="small ink" x="68" y="59">private</text>
     </g>
     <g transform="translate(1300 12)">
-      <circle cx="28" cy="40" r="28" fill="#fafafa" stroke="#e6e6e6" stroke-width="2"/>
-      <path d="M31 12L16 39h15l-6 29 23-36H33l-2-20Z" fill="#171717"/>
-      <text class="small ink" x="78" y="33">Fast &amp;</text>
-      <text class="small ink" x="78" y="59">reliable</text>
+      <circle cx="28" cy="40" r="22" fill="#fafafa" stroke="#e6e6e6" stroke-width="2"/>
+      <use href="#bolt-feature-icon" x="16" y="28" width="24" height="24"/>
+      <text class="small ink" x="68" y="33">Fast &amp;</text>
+      <text class="small ink" x="68" y="59">reliable</text>
     </g>
   </g>
 </svg>
