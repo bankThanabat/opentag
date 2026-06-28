@@ -1,78 +1,58 @@
 # Local Echo Loop
 
-Use this path to prove OpenTag works without GitHub, Slack, tokens, or a real coding agent.
+Use this path when the user wants to prove the CLI and local runtime work before connecting a real platform or coding agent.
 
-## Required Values
+## What Echo Means
 
-- `runnerId`: local runner id, usually `runner_local`
-- `dispatcherUrl`: usually `http://localhost:3030`
-- Repository owner and repo name, such as `acme/demo`
-- Absolute local checkout path for that repository
+Echo is a dev/test executor. It does not run Codex, Claude Code, or any real code changes. It only proves that OpenTag can save config, start locally, create a run, and return a visible result.
 
-## Minimal Config
+Do not recommend Echo for real use unless the user explicitly wants a smoke test.
 
-Create a local config file such as `opentag.local.json`:
+## User Path
 
-```json
-{
-  "runnerId": "runner_local",
-  "dispatcherUrl": "http://localhost:3030",
-  "repositories": [
-    {
-      "provider": "github",
-      "owner": "acme",
-      "repo": "demo",
-      "checkoutPath": "/Users/example/repos/demo",
-      "defaultExecutor": "echo"
-    }
-  ]
-}
-```
-
-If `OPENTAG_PAIRING_TOKEN` is set on the dispatcher, include the same value as `pairingToken` in this file.
-
-Do not include GitHub tokens, Slack fields, `baseBranch`, or `pushRemote` for a pure echo smoke test. Those fields belong to live callback, Slack, or PR-producing runner paths.
-
-## Commands
-
-Start the dispatcher:
+Install or run the CLI:
 
 ```bash
-OPENTAG_DATABASE_PATH=opentag.db pnpm --filter @opentag/dispatcher-app dev
+npm install -g @opentag/cli
+opentag setup
 ```
 
-Register and bind the local runner:
+During setup, choose:
+
+```text
+Coding agent: Echo
+Platform: whichever platform the user wants to test, or the smallest available local path
+Project: the local checkout the user wants OpenTag to know about
+```
+
+Then start OpenTag:
 
 ```bash
-OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- register-runner
-OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- bind-repos
+opentag start
 ```
 
-Create the sample run:
+Keep that process running. Stop it with Ctrl-C.
+
+## Verification
+
+Use the CLI status commands first:
 
 ```bash
-curl -X POST http://localhost:3030/v1/runs \
-  -H 'content-type: application/json' \
-  -d @examples/github-to-echo/run.example.json
+opentag status
+opentag doctor
+opentag config show
 ```
 
-Run one daemon iteration:
+For a platform-backed Echo smoke, send a real mention from the connected platform. Expected result:
 
-```bash
-OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- run-once
-```
-
-Inspect proof:
-
-```bash
-curl http://localhost:3030/v1/runs/run_demo_1
-curl http://localhost:3030/v1/runs/run_demo_1/events
-```
+1. OpenTag receives the mention.
+2. The local dispatcher creates a run.
+3. Echo completes without changing files.
+4. OpenTag replies back to the same platform thread or conversation.
 
 ## Success Criteria
 
-- `register-runner` prints the runner id.
-- `bind-repos` prints the mapped repository and checkout.
-- `POST /v1/runs` returns a created run.
-- `run-once` prints `OpenTag run completed`.
-- `/events` contains acknowledgement, running/progress, and completion events.
+- `opentag setup` writes `~/.config/opentag/config.json`.
+- `opentag start` reports that the dispatcher and selected listener are running.
+- `opentag status` can read the config.
+- A real platform mention produces a visible Echo response or a clear actionable error.

@@ -1,91 +1,88 @@
-# Slack Mention Setup
+# Slack Setup
 
-Use this path when the user wants Slack `app_mention` events to create OpenTag runs.
+Use this path when the user wants Slack mentions to run a local OpenTag coding agent and reply in the same Slack thread.
 
-## Required Values
-
-- Slack signing secret
-- Slack team id and channel id
-- Repository owner and repo that the channel should map to
-- Dispatcher URL
-- Optional dispatcher pairing token
-- Slack bot token if the dispatcher should post replies back to Slack
-
-## Dispatcher
-
-Start the dispatcher with Slack callback delivery when final replies should be posted to Slack:
-
-```bash
-OPENTAG_DATABASE_PATH=opentag.db \
-OPENTAG_SLACK_BOT_TOKEN=xoxb_token \
-pnpm --filter @opentag/dispatcher-app dev
-```
-
-If the dispatcher requires auth, set `OPENTAG_PAIRING_TOKEN` and pass the same value to Slack ingress as `OPENTAG_DISPATCHER_TOKEN`.
-
-## Local Runner Binding
-
-Add both repository and Slack channel bindings to `opentag.local.json`:
-
-```json
-{
-  "runnerId": "runner_local",
-  "dispatcherUrl": "http://localhost:3030",
-  "repositories": [
-    {
-      "provider": "github",
-      "owner": "acme",
-      "repo": "demo",
-      "checkoutPath": "/Users/example/repos/demo",
-      "defaultExecutor": "echo",
-      "baseBranch": "main",
-      "pushRemote": "origin"
-    }
-  ],
-  "slackChannels": [
-    {
-      "teamId": "T123",
-      "channelId": "C123",
-      "repoProvider": "github",
-      "owner": "acme",
-      "repo": "demo"
-    }
-  ]
-}
-```
-
-Run:
-
-```bash
-OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- register-runner
-OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- bind-repos
-OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- bind-slack-channels
-```
-
-## Slack Events App
-
-Start the Slack Events ingress:
-
-```bash
-SLACK_SIGNING_SECRET=secret \
-OPENTAG_DISPATCHER_URL=http://localhost:3030 \
-pnpm --filter @opentag/slack-events dev
-```
-
-If the dispatcher requires auth, also set `OPENTAG_DISPATCHER_TOKEN`.
-
-Point Slack Events API to:
+Read the repository guide as the source of truth before giving credential steps:
 
 ```text
-https://your-public-url/slack/events
+docs/platforms/slack.en.md
 ```
 
-For local testing, expose the local Slack Events port with a tunnel and use its `/slack/events` URL. Slack `url_verification` must receive the raw challenge text.
+## Recommended Mode
+
+Prefer Slack Socket Mode for local CLI users. It lets `opentag start` receive Slack events over a WebSocket, so the user does not need a public URL.
+
+Use Public Events API only when the user intentionally wants a hosted endpoint or a tunnel-based setup.
+
+## What The User Needs
+
+For Socket Mode:
+
+- Slack App-Level Token, starts with `xapp-`
+- Slack Bot User OAuth Token, starts with `xoxb-`
+- Slack Team ID
+- Slack Channel ID
+- The app invited to the target channel
+
+For Public Events API:
+
+- Slack Signing Secret
+- Slack Bot User OAuth Token
+- A public URL that forwards to the local Slack listener
+- Slack Team ID
+- Slack Channel ID
+
+Never invent these values. Walk the user through Slack's app page and ask them to paste the values when ready.
+
+## User Path
+
+```bash
+npm install -g @opentag/cli
+opentag setup
+```
+
+During setup, choose:
+
+```text
+Platform: Slack
+Connection mode: Local Socket Mode, unless the user explicitly wants Public Events API
+Coding agent: Codex or Claude Code for real work; Echo only for dev/test
+Project: the local checkout OpenTag should operate on
+```
+
+Then:
+
+```bash
+opentag start
+```
+
+Keep it running and mention the Slack app in the configured channel.
+
+## Verification
+
+```bash
+opentag status
+opentag doctor
+opentag config show
+```
+
+In Slack:
+
+```text
+@OpenTag investigate this
+```
+
+Use the app's actual Slack display name. If the app is not in the channel, invite it first:
+
+```text
+/invite @OpenTag
+```
 
 ## Success Criteria
 
-- Slack URL verification succeeds.
-- Unbound channels are ignored with `ignored: "unbound_channel"`.
-- A bound channel `@opentag` mention creates a dispatcher run.
-- `opentagd run-once` completes the run.
-- Slack receives callbacks if `OPENTAG_SLACK_BOT_TOKEN` and callback URI are configured.
+- Socket Mode connects, or Public Events API receives the Slack request.
+- A Slack `app_mention` creates a run.
+- The selected local executor starts.
+- OpenTag replies in the same Slack thread.
+
+If the reply includes a pull request action, GitHub PR creation needs a GitHub repository target and token too. Slack credentials alone prove Slack delivery, not GitHub write access.

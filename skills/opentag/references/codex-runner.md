@@ -1,67 +1,86 @@
-# Codex Runner
+# Codex And Claude Code Runners
 
-Use this path when the user wants OpenTag to run real coding work and optionally open a pull request.
+Use this path when the user wants OpenTag to run real coding work with Codex or Claude Code.
 
-## Required Values
+## Executor Choices
 
-- A local repository checkout with no unrelated dirty changes
-- `defaultExecutor`: `codex`
-- `baseBranch`, usually `main`
-- `pushRemote`, usually `origin`
-- GitHub token in `githubToken` when PR creation is desired
-- A working Codex CLI available to the daemon process
+- Codex uses the local `codex` command.
+- Claude Code uses the local `claude` command.
+- Echo is dev/test only and does not run a real coding agent.
 
-## Config
+Prefer the executor the user already has installed. Do not silently switch executors without telling the user.
 
-Set the repository executor to `codex`:
+## Prerequisites
 
-```json
-{
-  "runnerId": "runner_local",
-  "dispatcherUrl": "http://localhost:3030",
-  "githubToken": "ghs_optional_token_for_pr_creation",
-  "repositories": [
-    {
-      "provider": "github",
-      "owner": "acme",
-      "repo": "demo",
-      "checkoutPath": "/Users/example/repos/demo",
-      "defaultExecutor": "codex",
-      "baseBranch": "main",
-      "pushRemote": "origin"
-    }
-  ]
-}
+For Codex:
+
+```bash
+codex --version
 ```
 
-## Behavior
+For Claude Code:
 
-The Codex executor:
+```bash
+claude --version
+```
 
-- Refuses dirty workspaces.
-- Creates an isolated branch named `opentag/<runId>`.
-- Runs `codex exec` with the normalized command text.
-- Reports changed files and verification details.
-- Pushes the branch and opens a PR when the run intent and credentials allow it.
+The user also needs a local project checkout that the chosen executor can safely edit.
+
+## User Path
+
+```bash
+npm install -g @opentag/cli
+opentag setup
+```
+
+During setup, choose Codex or Claude Code when asked:
+
+```text
+Which coding agent should OpenTag use?
+```
+
+Then:
+
+```bash
+opentag start
+```
+
+Keep it running while testing a real mention from Slack, GitHub, or Lark / Feishu.
+
+## Working Tree Rule
+
+Before asking OpenTag to perform write-capable work, check the target repository:
+
+```bash
+git status --short
+```
+
+If there are unrelated dirty changes, ask the user how to proceed. Do not discard user changes.
+
+## GitHub Pull Requests
+
+Creating a pull request from a run needs more than a coding executor:
+
+- A GitHub repository target in OpenTag config.
+- A GitHub token for comments and pull requests.
+- Local git remote credentials that can push run branches.
+
+The normal flow is:
+
+1. The executor changes files.
+2. OpenTag prepares and pushes a run branch.
+3. OpenTag shows a `create_pull_request` action.
+4. The user replies `apply 1`.
+5. OpenTag creates the pull request.
+
+Do not promise PR creation unless those conditions are met.
 
 ## Verification
 
-Before a live run:
-
 ```bash
-git -C /Users/example/repos/demo status --short
-OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- bind-repos
+opentag executors
+opentag status
+opentag doctor
 ```
 
-Then create a run through GitHub, Slack, or `POST /v1/runs`, and execute:
-
-```bash
-OPENTAG_CONFIG_PATH=opentag.local.json pnpm --filter @opentag/opentagd dev -- run-once
-```
-
-## Success Criteria
-
-- The daemon claims the run for the mapped repository.
-- A branch named `opentag/<runId>` exists locally.
-- The final result lists changed files or explains why no change was needed.
-- If PR creation is enabled, the result includes the PR URL.
+Success means OpenTag can see the configured executor, start the local runtime, receive a real platform mention, and return either a completed result or a clear actionable error.
