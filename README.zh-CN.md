@@ -25,6 +25,12 @@
 
 OpenTag 让团队可以在已经使用的协作软件里提及一个 coding agent。它可以监听 Slack、GitHub 或 Lark / 飞书，在你的电脑上运行 Codex 或 Claude Code，然后把结果回复回原来的地方。
 
+## 演示
+
+在 Slack 里提及 OpenTag，审批建议动作，然后得到一个真实的 GitHub pull request。
+
+https://github.com/user-attachments/assets/86edc4e1-7de9-4d07-a0ba-847fa6438191
+
 ![OpenTag overview](./assets/readme-hero.png)
 
 ## 快速开始

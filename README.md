@@ -1,7 +1,3 @@
-
-
-https://github.com/user-attachments/assets/86edc4e1-7de9-4d07-a0ba-847fa6438191
-
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./assets/readme-logo-dark.png">
@@ -28,6 +24,12 @@ https://github.com/user-attachments/assets/86edc4e1-7de9-4d07-a0ba-847fa6438191
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 
 OpenTag lets your team mention a coding agent from the collaboration platforms they already use. It listens to Slack, GitHub, or Lark / Feishu, runs Codex or Claude Code on your computer, and sends the result back to the same place.
+
+## Demo
+
+Mention OpenTag in Slack, approve the suggested action, and get a real GitHub pull request.
+
+https://github.com/user-attachments/assets/86edc4e1-7de9-4d07-a0ba-847fa6438191
 
 ![OpenTag overview](./assets/readme-hero.png)
 
