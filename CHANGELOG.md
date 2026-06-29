@@ -1,5 +1,75 @@
 # Changelog
 
+## v0.3.0 - 2026-06-30
+
+OpenTag 0.3.0 improves the local CLI setup path and makes source-thread
+approvals clearer in Slack and GitHub.
+
+### Added
+
+- Slack source-thread action buttons for `apply`, `approve`, `reject`, and
+  `continue`
+- Slack Events API and Socket Mode handling for interactive Block Kit actions
+- Slack source-message receipt reactions with a text acknowledgement fallback
+- Custom executor command support in CLI setup and local runtime config
+- Structured executor report parsing for Codex and Claude Code summaries
+- GitHub suggested-action rendering with clearer action details and verification
+  rows
+- Real Slack UI trigger dogfood script for live end-to-end validation
+
+### Changed
+
+- Slack final callbacks are quieter and keep internal proposal metadata out of
+  the main thread
+- GitHub and Slack action decisions now route through the same source-thread
+  action path as typed commands
+- Executor summaries avoid presenting source-control handoff steps as manual
+  user blockers
+- `opentag doctor` catches deprecated Codex model tiers
+- Public README setup flow now points users at the published CLI first
+
+### Fixed
+
+- Common repository-edit requests for extensionless files such as `Dockerfile`
+  and `Makefile` receive the right local write scope
+- GitHub suggested-action details keep summary-only verification rows visible
+- Slack receipt delivery is bounded without silently losing acknowledgement
+  fallback behavior
+
+### Packages
+
+- `@opentag/cli`
+- `@opentag/local-runtime`
+- `@opentag/core`
+- `@opentag/client`
+- `@opentag/dispatcher`
+- `@opentag/github`
+- `@opentag/lark`
+- `@opentag/slack`
+- `@opentag/telegram`
+- `@opentag/runner`
+- `@opentag/store`
+
+## v0.2.0 - 2026-06-29
+
+Coordinated package release that made the local CLI the primary published entry
+point.
+
+### Added
+
+- Published `@opentag/cli` package with the `opentag` binary
+- Published `@opentag/local-runtime`
+- Published Lark / Feishu and Telegram adapter packages
+- CLI setup, doctor, status, config, platform, and executor commands
+- Release preflight that builds, packs, installs, and verifies the published
+  CLI command from tarballs
+
+### Changed
+
+- README and release docs now point users at `npm install -g @opentag/cli` and
+  `npx @opentag/cli`
+- Public package versions are aligned across the `@opentag/*` package family
+
 ## v0.1.0 - 2026-06-24
 
 Initial public v0 release of OpenTag.
