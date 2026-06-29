@@ -1,5 +1,6 @@
 import { contextPointerLabel, type ContextPacket, type ContextPointer } from "@opentag/core";
 import { assertCommandSucceeded, nodeCommandRunner, type CommandRunner } from "./command.js";
+import { executorPolicyPromptLines } from "./executor-report.js";
 import { renderContextPacketForPrompt, type ExecutorAdapter } from "./executor.js";
 import {
   branchNameForRun,
@@ -44,7 +45,7 @@ function buildPrompt(input: {
     "Context pointers:",
     contextLines(input.context),
     "",
-    "Work autonomously but keep the change narrow. Run relevant verification if you modify files. End with a concise summary."
+    ...executorPolicyPromptLines()
   ].join("\n");
 }
 
