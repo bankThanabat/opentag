@@ -109,4 +109,96 @@ describe("Slack Socket Mode", () => {
     await handle.close();
     expect(socket.closeCalled).toBe(true);
   });
+
+  it("retries after a transient apps.connections.open failure instead of rejecting the start promise", async () => {
+    const socket = new FakeWebSocket();
+    let socketCreated = false;
+    // First open attempt fails (Slack returns ok:false), second succeeds. A
+    // rejecting startPromise would abort the entire OpenTag daemon, so the loop
+    // must swallow the transient failure and retry.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, error: "ratelimited" }))
+      .mockResolvedValue(Response.json({ ok: true, url: "wss://slack.example/socket" })) as unknown as typeof fetch;
+
+    let rejected = false;
+    const handle = startSlackSocketModeApp(
+      {
+        appToken: "xapp-token",
+        slackApp: {
+          agentId: "opentag",
+          appId: "A123"
+        },
+        async resolveChannelBinding() {
+          return { teamId: "T123", channelId: "C123", repoProvider: "github", owner: "acme", repo: "demo" };
+        },
+        createRun: vi.fn(async () => ({ runId: "run_1" })),
+        now: () => "2024-06-24T00:00:00.000Z"
+      },
+      {
+        fetchImpl,
+        reconnectDelayMs: 1,
+        createWebSocket() {
+          socketCreated = true;
+          return socket as unknown as WebSocket;
+        },
+        log() {},
+        logError() {}
+      }
+    );
+
+    handle.startPromise.catch(() => {
+      rejected = true;
+    });
+
+    // The first attempt fails; the second attempt must run and open the socket.
+    await eventually(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
+    await eventually(() => expect(socketCreated).toBe(true));
+    expect(rejected).toBe(false);
+
+    await handle.close();
+    // close() awaits startPromise; if it had rejected, the flag would be set.
+    expect(rejected).toBe(false);
+  });
+
+  it("rejects the start promise on a terminal auth error instead of retrying forever", async () => {
+    let socketCreated = false;
+    // Slack returns a terminal auth failure. Retrying would loop forever against
+    // the API, so startPromise must reject and the open must not be reattempted.
+    const fetchImpl = vi.fn(async () => Response.json({ ok: false, error: "invalid_auth" })) as unknown as typeof fetch;
+
+    const handle = startSlackSocketModeApp(
+      {
+        appToken: "xapp-bad-token",
+        slackApp: {
+          agentId: "opentag",
+          appId: "A123"
+        },
+        async resolveChannelBinding() {
+          return { teamId: "T123", channelId: "C123", repoProvider: "github", owner: "acme", repo: "demo" };
+        },
+        createRun: vi.fn(async () => ({ runId: "run_1" })),
+        now: () => "2024-06-24T00:00:00.000Z"
+      },
+      {
+        fetchImpl,
+        reconnectDelayMs: 1,
+        createWebSocket() {
+          socketCreated = true;
+          return new FakeWebSocket() as unknown as WebSocket;
+        },
+        log() {},
+        logError() {}
+      }
+    );
+
+    await expect(handle.startPromise).rejects.toThrow(/invalid_auth/);
+    // A terminal error must not be retried, so only one open attempt happens and
+    // no socket is ever created.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(socketCreated).toBe(false);
+
+    // close() must remain safe to call even after a rejected startPromise.
+    await expect(handle.close()).resolves.toBeUndefined();
+  });
 });
