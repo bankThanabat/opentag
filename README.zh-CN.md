@@ -228,3 +228,15 @@ opentag-dev setup
 ## 许可证
 
 OpenTag 基于 MIT License 开源。详见 [LICENSE](LICENSE)。
+
+## 交流微信群
+
+🎉 欢迎大家在群里交流：
+• 使用体验/bug 反馈
+• 功能建议/场景需求
+• 开源贡献与共创想法
+
+我们会在群里同步项目进展和版本更新。欢迎大家一起玩、一起提 issue、一起把 OpenTag 做得更好！👏
+
+<img width="939" height="1455" alt="img_v3_02134_6a2eaf32-fa30-481c-8a74-a1827bf1a6hu" src="https://github.com/user-attachments/assets/43604f5e-4f1d-4ad4-9a7d-a79832c54a28" />
+
