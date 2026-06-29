@@ -1,5 +1,5 @@
 import { createDispatcherClient } from "@opentag/client";
-import { createClaudeCodeExecutor, createCodexExecutor, createEchoExecutor, type RunnerSecurityPolicy } from "@opentag/runner";
+import { createClaudeCodeExecutor, createCodexExecutor, createEchoExecutor, createHermesExecutor, type RunnerSecurityPolicy } from "@opentag/runner";
 import type { OpenTagDaemonConfig } from "./config.js";
 import type { DaemonClient } from "./daemon.js";
 import type { PullRequestOptions } from "./pr.js";
@@ -32,6 +32,11 @@ export function executorsFromConfig(config: OpenTagDaemonConfig) {
       ...(config.claudeCode?.dangerouslySkipPermissions !== undefined
         ? { dangerouslySkipPermissions: config.claudeCode.dangerouslySkipPermissions }
         : {})
+    }),
+    hermes: createHermesExecutor({
+      ...(config.hermes?.command ? { hermesCommand: config.hermes.command } : {}),
+      ...(config.hermes?.profile ? { profile: config.hermes.profile } : {}),
+      ...(config.hermes?.profileTemplate ? { profileTemplate: config.hermes.profileTemplate } : {})
     })
   };
 }

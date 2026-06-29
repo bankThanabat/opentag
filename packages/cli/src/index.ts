@@ -29,7 +29,7 @@ program
   .option("--config <path>", "Config file path")
   .option("--project <path>", "Project checkout path")
   .option("--language <language>", "Setup language: en or zh-CN")
-  .option("--executor <executor>", "Default executor: echo, codex, or claude-code")
+  .option("--executor <executor>", "Default executor: echo, codex, claude-code, or hermes")
   .option("--lark-setup <method>", "Lark setup method: saved, scan, or manual")
   .option("--lark-app-id <id>", "Lark app id")
   .option("--lark-app-secret <secret>", "Lark app secret")

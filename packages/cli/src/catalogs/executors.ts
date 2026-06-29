@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { delimiter, extname, join } from "node:path";
 
-export type ExecutorId = "echo" | "codex" | "claude-code";
+export type ExecutorId = "echo" | "codex" | "claude-code" | "hermes";
 
 export type ExecutorDescriptor = {
   id: ExecutorId;
@@ -29,6 +29,11 @@ export const EXECUTOR_CATALOG: ExecutorDescriptor[] = [
     command: "claude"
   },
   {
+    id: "hermes",
+    label: "Hermes",
+    command: "hermes"
+  },
+  {
     id: "echo",
     label: "Echo",
     alwaysAvailable: true,
@@ -46,7 +51,7 @@ function pathExistsOnPath(command: string, env: NodeJS.ProcessEnv = process.env)
 }
 
 export function isExecutorId(value: string): value is ExecutorId {
-  return value === "echo" || value === "codex" || value === "claude-code";
+  return value === "echo" || value === "codex" || value === "claude-code" || value === "hermes";
 }
 
 export function detectExecutors(env: NodeJS.ProcessEnv = process.env): ExecutorDetection[] {
@@ -80,6 +85,9 @@ export function defaultExecutorId(input: {
   }
   if (detections.find((executor) => executor.id === "claude-code")?.available) {
     return "claude-code";
+  }
+  if (detections.find((executor) => executor.id === "hermes")?.available) {
+    return "hermes";
   }
   return "echo";
 }

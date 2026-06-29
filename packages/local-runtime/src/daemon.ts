@@ -62,6 +62,32 @@ function pullRequestPreparationFailureResult(result: OpenTagRunResult, error: un
   };
 }
 
+function metadataToken(metadata: Record<string, unknown>, key: string): string | undefined {
+  const value = metadata[key];
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+function executorMetadata(event: OpenTagEvent): Record<string, unknown> {
+  const accountId =
+    metadataToken(event.metadata, "accountId") ??
+    metadataToken(event.metadata, "teamId") ??
+    metadataToken(event.metadata, "tenantKey") ??
+    metadataToken(event.metadata, "botId");
+  const conversationId =
+    metadataToken(event.metadata, "conversationId") ??
+    metadataToken(event.metadata, "channelId") ??
+    metadataToken(event.metadata, "chatId");
+
+  return {
+    ...event.metadata,
+    provider: event.source,
+    ...(accountId ? { accountId } : {}),
+    ...(conversationId ? { conversationId } : {})
+  };
+}
+
 export async function runOneDaemonIteration(input: {
   runnerId: string;
   repositories: RepositoryBindingConfig[];
@@ -91,6 +117,7 @@ export async function runOneDaemonIteration(input: {
     });
     return true;
   }
+  const metadata = executorMetadata(claimed.event);
 
   const executionPath =
     executorId === "codex"
@@ -135,6 +162,7 @@ export async function runOneDaemonIteration(input: {
       context: claimed.event.context,
       ...(claimed.run.contextPacket ? { contextPacket: claimed.run.contextPacket } : {}),
       permissions: claimed.event.permissions,
+      metadata,
       ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {}),
       ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {}),
       ...(binding.keepWorktree !== undefined ? { keepWorktree: binding.keepWorktree } : {})
@@ -173,6 +201,7 @@ export async function runOneDaemonIteration(input: {
         context: claimed.event.context,
         ...(claimed.run.contextPacket ? { contextPacket: claimed.run.contextPacket } : {}),
         permissions: claimed.event.permissions,
+        metadata,
         ...(binding.baseBranch ? { baseBranch: binding.baseBranch } : {}),
         ...(binding.worktreeRoot ? { worktreeRoot: binding.worktreeRoot } : {}),
         ...(binding.keepWorktree !== undefined ? { keepWorktree: binding.keepWorktree } : {})

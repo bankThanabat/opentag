@@ -6,3 +6,4 @@ export * from "./executor.js";
 export * from "./git.js";
 export * from "./result.js";
 export * from "./security.js";
+export * from "./hermes.js";
