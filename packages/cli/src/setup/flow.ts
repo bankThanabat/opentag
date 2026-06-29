@@ -7,15 +7,14 @@ import {
   detectExecutors,
   EXECUTOR_CATALOG,
   executorLabel,
-  parseExecutorId,
-  type ExecutorId
+  isExecutorId
 } from "../catalogs/executors.js";
 import { LANGUAGE_OPTIONS, parseCliLanguage, type CliLanguage } from "../catalogs/languages.js";
 import { formatPlatformStatus, PLATFORM_CATALOG, parsePlatformId, platformById, type PlatformId } from "../catalogs/platforms.js";
 import { formatSavedLarkCredentialsHint } from "../platforms/lark/display.js";
 import { readLegacyLarkCredentials, type SavedLarkCredentials } from "../platforms/lark/saved-config.js";
 import { DEFAULT_GITHUB_WEBHOOK_PORT, DEFAULT_SLACK_EVENTS_PORT, parseLocalPort } from "../platforms/ports.js";
-import type { PromptAdapter } from "../ui/prompts.js";
+import type { PromptAdapter, PromptOption } from "../ui/prompts.js";
 import { bindingMethodHint, bindingMethodLabel, larkSetupHint, larkSetupLabel, slackModeHint, slackModeLabel, t } from "../ui/messages.js";
 import { loadSetupDefaults } from "./defaults.js";
 import { formatGitHubTokenHelp, formatLarkManualCredentialHelp, formatPlatformSetupGuide, formatSlackCredentialHelp } from "./guides.js";
@@ -292,34 +291,53 @@ async function collectExecutor(
   prompts: PromptAdapter,
   language: CliLanguage,
   env: NodeJS.ProcessEnv | undefined
-): Promise<ExecutorId> {
-  if (options.executor) {
-    return parseExecutorId(options.executor);
+): Promise<string> {
+  if (options.executor !== undefined) {
+    const executor = options.executor.trim();
+    if (executor.length === 0) {
+      throw new Error("Executor id must not be empty.");
+    }
+    return executor;
   }
   const detections = detectExecutors(env);
-  const previous = defaults.executor;
-  const initialValue = defaultExecutorId({
-    ...(previous ? { previous } : {}),
-    detections
+  const normalizedPrevious = defaults.executor?.trim();
+  if (normalizedPrevious !== undefined && normalizedPrevious.length === 0) {
+    throw new Error("Executor id must not be empty.");
+  }
+  const previousBuiltIn = normalizedPrevious !== undefined && isExecutorId(normalizedPrevious) ? normalizedPrevious : undefined;
+  // A configured custom executor can't be represented by the built-in picker,
+  // so surface it as a pre-selected option: the user keeps it by default but
+  // can still switch to a built-in, instead of it being silently overwritten
+  // (or the prompt being skipped) on an unrelated wizard re-run.
+  const customPrevious = normalizedPrevious !== undefined && previousBuiltIn === undefined ? normalizedPrevious : undefined;
+  const initialValue =
+    customPrevious ??
+    defaultExecutorId({
+      ...(previousBuiltIn ? { previous: previousBuiltIn } : {}),
+      detections
+    });
+
+  const builtInOptions: Array<PromptOption<string>> = EXECUTOR_CATALOG.map((executor) => {
+    const detection = detections.find((entry) => entry.id === executor.id);
+    return {
+      value: executor.id,
+      label: executor.label,
+      hint: formatExecutorHint({
+        language,
+        executor,
+        available: detection?.available ?? false,
+        current: executor.id === normalizedPrevious,
+        selectedByDefault: executor.id === initialValue
+      })
+    };
   });
 
   return prompts.select({
     message: t(language, "executor"),
     initialValue,
-    options: EXECUTOR_CATALOG.map((executor) => {
-      const detection = detections.find((entry) => entry.id === executor.id);
-      return {
-        value: executor.id,
-        label: executor.label,
-        hint: formatExecutorHint({
-          language,
-          executor,
-          available: detection?.available ?? false,
-          current: executor.id === previous,
-          selectedByDefault: executor.id === initialValue
-        })
-      };
-    })
+    options: customPrevious
+      ? [{ value: customPrevious, label: customPrevious, hint: t(language, "executorCustomHint") }, ...builtInOptions]
+      : builtInOptions
   });
 }
 
