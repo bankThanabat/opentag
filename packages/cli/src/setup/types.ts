@@ -40,6 +40,12 @@ export type GitHubSetupInput = {
   port: number;
 };
 
+export type HermesSetupInput = {
+  command?: string;
+  profile?: string;
+  profileTemplate?: string;
+};
+
 export type OpenTagSetupInput = {
   language: CliLanguage;
   platform: PlatformId;
@@ -49,6 +55,7 @@ export type OpenTagSetupInput = {
   lark?: LarkSetupInput;
   slack?: SlackSetupInput;
   github?: GitHubSetupInput;
+  hermes?: HermesSetupInput;
 };
 
 export type SetupDefaults = Partial<{
@@ -69,5 +76,8 @@ export type SetupDefaults = Partial<{
   githubWebhookSecret: string;
   githubWebhookPath: string;
   githubAutoCreatePullRequest: boolean;
+  hermesCommand: string;
+  hermesProfile: string;
+  hermesProfileTemplate: string;
   savedLarkCredentials: SavedLarkCredentials;
 }>;

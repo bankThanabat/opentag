@@ -9,7 +9,7 @@ import type { PlatformId } from "./catalogs/platforms.js";
 
 // Executor ids (repository bindings and the last-used preference) accept any
 // trimmed non-empty string so custom executors registered by a standalone runner
-// validate; echo, codex, and claude-code remain the documented built-ins.
+// validate; echo, codex, claude-code, and hermes remain the documented built-ins.
 // Mirrors the daemon config and the open runtime dispatch.
 const ExecutorIdSchema = z.string().trim().min(1);
 const KeepWorktreeSchema = z.enum(["always", "on_failure", "never"]);
@@ -56,6 +56,14 @@ const ClaudeCodeSchema = z
   })
   .strict();
 
+const HermesSchema = z
+  .object({
+    command: z.string().trim().min(1).optional(),
+    profile: z.string().trim().min(1).optional(),
+    profileTemplate: z.string().trim().min(1).optional()
+  })
+  .strict();
+
 const SecuritySchema = z
   .object({
     mode: z.enum(["enforce", "audit", "off"]).optional(),
@@ -72,6 +80,7 @@ const DaemonConfigSchema = z
     repositories: z.array(RepositoryBindingSchema).min(1),
     channelBindings: z.array(ChannelBindingSchema).optional(),
     claudeCode: ClaudeCodeSchema.optional(),
+    hermes: HermesSchema.optional(),
     security: SecuritySchema.optional(),
     githubToken: z.string().min(1).optional(),
     preparePullRequestBranch: z.boolean().optional(),

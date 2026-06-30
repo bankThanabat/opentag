@@ -76,6 +76,44 @@ describe("opentagd config", () => {
     expect(parsed.preparePullRequestBranch).toBe(true);
   });
 
+  it("parses Hermes executor config", () => {
+    const parsed = parseDaemonConfig({
+      runnerId: "runner_test",
+      dispatcherUrl: "http://localhost:3030",
+      repositories: [{ owner: "acme", repo: "demo", checkoutPath: "/tmp/demo", defaultExecutor: "hermes" }],
+      hermes: {
+        command: "hermes-dev",
+        profileTemplate: "opentag-{provider}-{accountId}-{conversationId}"
+      }
+    } satisfies Partial<OpenTagDaemonConfig>);
+
+    expect(parsed.repositories[0]).toMatchObject({ defaultExecutor: "hermes" });
+    expect(parsed.hermes).toEqual({
+      command: "hermes-dev",
+      profileTemplate: "opentag-{provider}-{accountId}-{conversationId}"
+    });
+  });
+
+  it("loads Hermes profile settings from env", () => {
+    delete process.env.OPENTAG_CONFIG_PATH;
+    process.env.OPENTAG_REPO_OWNER = "acme";
+    process.env.OPENTAG_REPO_NAME = "demo";
+    process.env.OPENTAG_WORKSPACE_PATH = "/tmp/demo";
+    process.env.OPENTAG_DEFAULT_EXECUTOR = "hermes";
+    process.env.OPENTAG_HERMES_COMMAND = "hermes-dev";
+    process.env.OPENTAG_HERMES_PROFILE = "opentag-shared";
+    process.env.OPENTAG_HERMES_PROFILE_TEMPLATE = "opentag-{provider}-{accountId}-{conversationId}";
+
+    const config = loadConfigFromEnv();
+
+    expect(config.repositories[0]).toMatchObject({ defaultExecutor: "hermes" });
+    expect(config.hermes).toEqual({
+      command: "hermes-dev",
+      profile: "opentag-shared",
+      profileTemplate: "opentag-{provider}-{accountId}-{conversationId}"
+    });
+  });
+
   it("defaults Slack channel bindings to github repoProvider", () => {
     const parsed = parseDaemonConfig({
       dispatcherUrl: "http://localhost:3030",

@@ -109,6 +109,15 @@ export function createSetupConfig(input: OpenTagSetupInput, env: PathEnvironment
       dispatcherUrl: "http://localhost:3030",
       pairingToken: pairingToken(),
       repositories: repositoryBindings,
+      ...(input.hermes
+        ? {
+            hermes: {
+              ...(input.hermes.command ? { command: input.hermes.command } : {}),
+              ...(input.hermes.profile ? { profile: input.hermes.profile } : {}),
+              ...(input.hermes.profileTemplate ? { profileTemplate: input.hermes.profileTemplate } : {})
+            }
+          }
+        : {}),
       ...(channelBindings.length > 0 ? { channelBindings } : {}),
       ...(input.github ? { githubToken: input.github.token } : {}),
       ...(input.github ? { preparePullRequestBranch: true } : {}),

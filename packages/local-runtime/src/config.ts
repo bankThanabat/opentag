@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 
-// Accept any trimmed non-empty executor id. The built-ins are echo, codex, and
-// claude-code, but custom executors registered by a standalone runner are
+// Accept any trimmed non-empty executor id. The built-ins are echo, codex,
+// claude-code, and hermes, but custom executors registered by a standalone runner are
 // equally valid — config validation must not be stricter than the runtime
 // dispatch (which resolves executors by id) or the dispatcher wire contract
 // (executor: z.string().min(1)).
@@ -15,6 +15,12 @@ const ClaudeCodeExecutorConfigSchema = z.object({
   model: z.string().min(1).optional(),
   permissionMode: z.enum(["acceptEdits", "auto", "bypassPermissions", "default", "plan"]).optional(),
   dangerouslySkipPermissions: z.boolean().optional()
+});
+
+const HermesExecutorConfigSchema = z.object({
+  command: z.string().trim().min(1).optional(),
+  profile: z.string().trim().min(1).optional(),
+  profileTemplate: z.string().trim().min(1).optional()
 });
 
 const RunnerSecurityPolicySchema = z.object({
@@ -70,6 +76,7 @@ export const OpenTagDaemonConfigSchema = z.object({
   slackChannels: z.array(SlackChannelBindingConfigSchema).optional(),
   larkChannels: z.array(LarkChannelBindingConfigSchema).optional(),
   claudeCode: ClaudeCodeExecutorConfigSchema.optional(),
+  hermes: HermesExecutorConfigSchema.optional(),
   security: RunnerSecurityPolicySchema.optional(),
   githubToken: z.string().min(1).optional(),
   preparePullRequestBranch: z.boolean().optional(),
@@ -287,6 +294,15 @@ export function loadConfigFromEnv(): OpenTagDaemonConfig {
             ...(process.env.OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS
               ? { dangerouslySkipPermissions: process.env.OPENTAG_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS === "true" }
               : {})
+          }
+        }
+      : {}),
+    ...(process.env.OPENTAG_HERMES_COMMAND || process.env.OPENTAG_HERMES_PROFILE || process.env.OPENTAG_HERMES_PROFILE_TEMPLATE
+      ? {
+          hermes: {
+            ...(process.env.OPENTAG_HERMES_COMMAND ? { command: process.env.OPENTAG_HERMES_COMMAND } : {}),
+            ...(process.env.OPENTAG_HERMES_PROFILE ? { profile: process.env.OPENTAG_HERMES_PROFILE } : {}),
+            ...(process.env.OPENTAG_HERMES_PROFILE_TEMPLATE ? { profileTemplate: process.env.OPENTAG_HERMES_PROFILE_TEMPLATE } : {})
           }
         }
       : {}),

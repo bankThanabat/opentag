@@ -20,6 +20,7 @@ export type ExecutorRunInput = {
   baseBranch?: string;
   worktreeRoot?: string;
   keepWorktree?: "always" | "on_failure" | "never";
+  metadata?: Record<string, unknown>;
 };
 
 export function renderContextPacketForPrompt(packet?: ContextPacket): string[] {
