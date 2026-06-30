@@ -19,7 +19,10 @@ import { bindingMethodHint, bindingMethodLabel, larkSetupHint, larkSetupLabel, s
 import { loadSetupDefaults } from "./defaults.js";
 import { formatGitHubTokenHelp, formatLarkManualCredentialHelp, formatPlatformSetupGuide, formatSlackCredentialHelp } from "./guides.js";
 import { formatSetupReview } from "./summary.js";
-import type { BindingMethod, GitHubSetupInput, LarkSetupMethod, OpenTagSetupInput, SetupDefaults, SlackSetupInput, SlackSetupMode } from "./types.js";
+import type { BindingMethod, GitHubSetupInput, HermesSetupInput, LarkSetupMethod, OpenTagSetupInput, SetupDefaults, SlackSetupInput, SlackSetupMode } from "./types.js";
+
+const DEFAULT_HERMES_PROFILE_TEMPLATE =
+  "opentag-{provider}-{accountId}-{conversationId}-{owner}-{repo}-i{issueNumber}-pr{pullRequestNumber}";
 
 type LarkCredentialInput = {
   appId: string;
@@ -52,6 +55,9 @@ export type SetupCommandOptions = {
   githubWebhookPath?: string;
   githubPort?: string;
   githubAutoCreatePr?: boolean;
+  hermesCommand?: string;
+  hermesProfile?: string;
+  hermesProfileTemplate?: string;
   binding?: string;
   force?: boolean;
   yes?: boolean;
@@ -146,6 +152,33 @@ function assertExistingPath(path: string): string {
 function optionalTrimmed(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function hasHermesOptions(options: SetupCommandOptions): boolean {
+  return Boolean(options.hermesCommand || options.hermesProfile || options.hermesProfileTemplate);
+}
+
+function collectHermesSetup(options: SetupCommandOptions, defaults: SetupDefaults, executor: string): HermesSetupInput | undefined {
+  if (executor !== "hermes") {
+    if (hasHermesOptions(options)) {
+      throw new Error("--hermes-command, --hermes-profile, and --hermes-profile-template can only be used with --executor hermes.");
+    }
+    return undefined;
+  }
+
+  const explicitProfile = optionalTrimmed(options.hermesProfile);
+  const command = optionalTrimmed(options.hermesCommand) ?? defaults.hermesCommand;
+  const profile = explicitProfile ?? defaults.hermesProfile;
+  const profileTemplate =
+    optionalTrimmed(options.hermesProfileTemplate) ??
+    (explicitProfile ? undefined : defaults.hermesProfileTemplate) ??
+    (profile ? undefined : DEFAULT_HERMES_PROFILE_TEMPLATE);
+
+  return {
+    ...(command ? { command } : {}),
+    ...(profile ? { profile } : {}),
+    ...(profileTemplate ? { profileTemplate } : {})
+  };
 }
 
 function generateGitHubWebhookSecret(): string {
@@ -699,6 +732,7 @@ export async function collectSetupInput(
   const language = await collectLanguage(options, defaults, prompts);
   const platform = await collectPlatform(options, defaults, prompts, language);
   const executor = await collectExecutor(options, defaults, prompts, language, dependencies.env);
+  const hermesSetup = collectHermesSetup(options, defaults, executor);
   const projectPath = await collectProjectPath(options, defaults, prompts, language, cwd);
   const resolvedProjectPath = projectPath.trim() || cwd;
   const savedLarkCredentials =
@@ -732,6 +766,7 @@ export async function collectSetupInput(
     platform,
     projectPath: resolvedProjectPath,
     executor,
+    ...(hermesSetup ? { hermes: hermesSetup } : {}),
     ...(larkCredentials && larkDomain && larkSetupMethod && larkBindingMethod
       ? {
           lark: {

@@ -18,6 +18,7 @@ export function setupDefaultsFromConfig(config: OpenTagCliConfig): SetupDefaults
   const lark = config.platforms.lark;
   const slack = config.platforms.slack;
   const github = config.platforms.github;
+  const hermes = config.daemon.hermes;
   const lastSetup = config.preferences?.lastSetup;
   const savedLarkCredentials = savedLarkCredentialsFromCliConfig(config);
   const bindingMethod = defaultBindingMethod(config);
@@ -27,6 +28,9 @@ export function setupDefaultsFromConfig(config: OpenTagCliConfig): SetupDefaults
     ...(lastSetup?.platforms?.[0] ? { platform: lastSetup.platforms[0] } : lark ? { platform: "lark" } : slack ? { platform: "slack" } : github ? { platform: "github" } : {}),
     ...(repository?.checkoutPath ? { projectPath: repository.checkoutPath } : {}),
     ...(repository?.defaultExecutor ? { executor: repository.defaultExecutor } : {}),
+    ...(hermes?.command ? { hermesCommand: hermes.command } : {}),
+    ...(hermes?.profile ? { hermesProfile: hermes.profile } : {}),
+    ...(hermes?.profileTemplate ? { hermesProfileTemplate: hermes.profileTemplate } : {}),
     ...(lastSetup?.larkSetupMethod ? { larkSetupMethod: lastSetup.larkSetupMethod } : {}),
     ...(lastSetup?.larkDomain ? { larkDomain: lastSetup.larkDomain } : lark?.domain ? { larkDomain: lark.domain } : {}),
     ...(bindingMethod ? { bindingMethod } : {}),
