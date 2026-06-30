@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseThreadActionCommand, suggestedActionCandidatesFromResult } from "../src/action.js";
+import {
+  actionReceiptHeading,
+  buildActionReceipt,
+  parseThreadActionCommand,
+  suggestedActionCandidatesFromResult
+} from "../src/action.js";
 
 describe("thread action commands", () => {
   it("parses explicit English action replies", () => {
@@ -66,6 +71,102 @@ describe("thread action commands", () => {
   it("ignores ambiguous conversational text", () => {
     expect(parseThreadActionCommand("looks good to me")).toBeNull();
     expect(parseThreadActionCommand("maybe apply this later")).toBeNull();
+  });
+});
+
+describe("action receipts", () => {
+  const candidate = {
+    index: 1,
+    proposalId: "proposal_1",
+    proposalSummary: "Move issue forward.",
+    intent: {
+      intentId: "intent_label",
+      domain: "labels",
+      action: "add_label",
+      summary: "Add bug label."
+    }
+  };
+
+  it("defaults to approval-only when direct apply capability is not proven", () => {
+    const receipt = buildActionReceipt(candidate);
+
+    expect(receipt).toMatchObject({
+      state: "needs_approval",
+      targetLabel: "GitHub labels",
+      primaryDecision: "none",
+      visibleDecisions: ["approve", "reject"]
+    });
+    expect(actionReceiptHeading([receipt])).toBe("Needs approval");
+  });
+
+  it("uses capability context to expose ready-to-apply decisions", () => {
+    const receipt = buildActionReceipt(candidate, {
+      capabilityByIntentId: {
+        intent_label: { state: "ready_to_apply" }
+      }
+    });
+
+    expect(receipt).toMatchObject({
+      state: "ready_to_apply",
+      primaryDecision: "apply",
+      visibleDecisions: ["apply", "reject"]
+    });
+    expect(actionReceiptHeading([receipt])).toBe("Ready to apply");
+  });
+
+  it("uses setup context to hide apply and guide follow-up", () => {
+    const receipt = buildActionReceipt(candidate, {
+      capabilityByIntentId: {
+        intent_label: {
+          state: "needs_setup",
+          setupReason: "GitHub apply is not configured on this dispatcher."
+        }
+      }
+    });
+
+    expect(receipt).toMatchObject({
+      state: "needs_setup",
+      primaryDecision: "continue",
+      setupReason: "GitHub apply is not configured on this dispatcher.",
+      visibleDecisions: ["continue", "reject"]
+    });
+    expect(actionReceiptHeading([receipt])).toBe("Needs setup");
+  });
+
+  it("does not overstate readiness when receipt states are mixed", () => {
+    const ready = buildActionReceipt(candidate, {
+      capabilityByIntentId: {
+        intent_label: { state: "ready_to_apply" }
+      }
+    });
+    const setup = buildActionReceipt({
+      ...candidate,
+      index: 2,
+      intent: { ...candidate.intent, intentId: "intent_setup", summary: "Create a pull request." }
+    }, {
+      capabilityByIntentId: {
+        intent_setup: { state: "needs_setup", setupReason: "GitHub apply is not configured on this dispatcher." }
+      }
+    });
+    const approval = buildActionReceipt({
+      ...candidate,
+      index: 3,
+      intent: { ...candidate.intent, intentId: "intent_approval", summary: "Request human review." }
+    });
+    const unsupported = buildActionReceipt({
+      ...candidate,
+      index: 4,
+      intent: { ...candidate.intent, intentId: "intent_unsupported", summary: "Needs manual intervention." }
+    }, {
+      capabilityByIntentId: {
+        intent_unsupported: { state: "unsupported", setupReason: "This action is audit-only for now." }
+      }
+    });
+
+    expect(actionReceiptHeading([ready, setup])).toBe("Some actions need setup");
+    expect(actionReceiptHeading([unsupported])).toBe("Needs attention");
+    expect(actionReceiptHeading([ready, unsupported])).toBe("Some actions need attention");
+    expect(actionReceiptHeading([ready, approval])).toBe("Needs review");
   });
 });
 

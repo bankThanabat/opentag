@@ -30,6 +30,24 @@ describe("Slack callback rendering", () => {
     expect(text).not.toContain("**success**");
   });
 
+  it("keeps the text fallback when suggested changes render no receipts", () => {
+    const text = renderSlackFinalResult({
+      conclusion: "needs_human",
+      summary: "Prepared a follow-up.",
+      nextAction: "Reply continue 1 to refresh.",
+      suggestedChanges: [
+        {
+          proposalId: "proposal_empty",
+          createdAt: "2026-06-24T00:00:00.000Z",
+          summary: "No visible actions.",
+          intents: []
+        }
+      ]
+    });
+
+    expect(text).toContain("Next: Reply continue 1 to refresh.");
+  });
+
   it("converts common Markdown to Slack mrkdwn", () => {
     expect(markdownToSlackMrkdwn("**bold** and [docs](https://example.com)")).toBe("*bold* and <https://example.com|docs>");
     expect(markdownToSlackMrkdwn("Use <tag> & [docs & api](https://example.com?a=1&b=2)")).toBe(
@@ -84,7 +102,99 @@ describe("Slack callback rendering", () => {
     ]);
   });
 
+  it("adds the quiet audit context even when no receipts render", () => {
+    const blocks = createSlackFinalResultBlocks({
+      conclusion: "success",
+      summary: "Done."
+    }, {
+      auditRunId: "run_without_receipts"
+    });
+
+    expect(blocks.at(-1)).toEqual({
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: "Audit: `opentag status --run run_without_receipts`"
+        }
+      ]
+    });
+  });
+
   it("adds Block Kit buttons for suggested source-thread actions", () => {
+    const blocks = createSlackFinalResultBlocks({
+      conclusion: "needs_human",
+      summary: "Prepared a proposal.",
+      suggestedChanges: [
+        {
+          proposalId: "proposal_1",
+          createdAt: "2026-06-24T00:00:00.000Z",
+          summary: "Move issue forward.",
+          intents: [
+            {
+              intentId: "intent_label_1",
+              domain: "labels",
+              action: "add_label",
+              summary: "Add the bug label.",
+              params: { label: "bug" }
+            }
+          ]
+        }
+      ]
+    }, {
+      auditRunId: "run_receipt_1",
+      receiptContext: {
+        capabilityByIntentId: {
+          intent_label_1: { state: "ready_to_apply" }
+        }
+      }
+    });
+
+    const rendered = JSON.stringify(blocks);
+    expect(rendered).toContain("Ready to apply");
+    expect(rendered).toContain("1. *Add the bug label.*");
+    expect(rendered).toContain("Target: GitHub labels");
+    expect(rendered).toContain("Audit: `opentag status --run run_receipt_1`");
+    expect(rendered).not.toContain("Proposal:");
+    expect(rendered).not.toContain("Intent ID:");
+
+    const actionsBlock = blocks.find((block) => block.type === "actions");
+    expect(blocks.at(-1)).toEqual({
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: "Audit: `opentag status --run run_receipt_1`"
+        }
+      ]
+    });
+    expect(actionsBlock).toMatchObject({
+      type: "actions",
+      block_id: "opentag_actions_1",
+      elements: [
+        { type: "button", text: { type: "plain_text", text: "Apply 1" }, action_id: "opentag:apply:1", style: "primary" },
+        { type: "button", text: { type: "plain_text", text: "Reject" }, action_id: "opentag:reject:1", style: "danger" }
+      ]
+    });
+
+    if (actionsBlock?.type !== "actions") throw new Error("expected actions block");
+    expect(actionsBlock.elements.map((element) => parseSlackSuggestedActionButtonValue(element.value))).toEqual([
+      {
+        version: 1,
+        command: "apply 1",
+        proposalId: "proposal_1",
+        intentId: "intent_label_1"
+      },
+      {
+        version: 1,
+        command: "reject 1",
+        proposalId: "proposal_1",
+        intentId: "intent_label_1"
+      }
+    ]);
+  });
+
+  it("does not show Apply when receipt capability is not proven", () => {
     const blocks = createSlackFinalResultBlocks({
       conclusion: "needs_human",
       summary: "Prepared a proposal.",
@@ -107,47 +217,17 @@ describe("Slack callback rendering", () => {
     });
 
     const rendered = JSON.stringify(blocks);
-    expect(rendered).toContain("1. *Add the bug label.*");
-    expect(rendered).not.toContain("Proposal:");
-    expect(rendered).not.toContain("Intent ID:");
-
-    const actionsBlock = blocks.find((block) => block.type === "actions");
-    expect(actionsBlock).toMatchObject({
-      type: "actions",
-      block_id: "opentag_actions_1",
-      elements: [
-        { type: "button", text: { type: "plain_text", text: "Apply 1" }, action_id: "opentag:apply:1", style: "primary" },
-        { type: "button", text: { type: "plain_text", text: "Approve" }, action_id: "opentag:approve:1" },
-        { type: "button", text: { type: "plain_text", text: "Reject" }, action_id: "opentag:reject:1", style: "danger" }
-      ]
-    });
-
-    if (actionsBlock?.type !== "actions") throw new Error("expected actions block");
-    expect(actionsBlock.elements.map((element) => parseSlackSuggestedActionButtonValue(element.value))).toEqual([
-      {
-        version: 1,
-        command: "apply 1",
-        proposalId: "proposal_1",
-        intentId: "intent_label_1"
-      },
-      {
-        version: 1,
-        command: "approve 1",
-        proposalId: "proposal_1",
-        intentId: "intent_label_1"
-      },
-      {
-        version: 1,
-        command: "reject 1",
-        proposalId: "proposal_1",
-        intentId: "intent_label_1"
-      }
-    ]);
+    expect(rendered).toContain("Needs approval");
+    expect(rendered).not.toContain("Apply 1");
+    expect(rendered).not.toContain("opentag:apply:1");
+    expect(rendered).not.toContain('"command":"apply 1"');
+    expect(rendered).toContain("Approve only");
+    expect(rendered).toContain("Reject");
   });
 
   it("caps suggested action blocks to stay under Slack's Block Kit limit", () => {
-    const blocks = createSlackFinalResultBlocks({
-      conclusion: "needs_human",
+    const result = {
+      conclusion: "needs_human" as const,
       summary: "Prepared many proposals.",
       suggestedChanges: Array.from({ length: 30 }, (_item, index) => ({
         proposalId: `proposal_${index + 1}`,
@@ -163,6 +243,13 @@ describe("Slack callback rendering", () => {
           }
         ]
       }))
+    };
+    const blocks = createSlackFinalResultBlocks(result, {
+      receiptContext: {
+        capabilityByIntentId: Object.fromEntries(
+          result.suggestedChanges.flatMap((snapshot) => snapshot.intents.map((intent) => [intent.intentId, { state: "ready_to_apply" as const }]))
+        )
+      }
     });
 
     const rendered = JSON.stringify(blocks);
